@@ -1,0 +1,25 @@
+services:
+  bot:
+    restart: unless-stopped
+    build: .
+    container_name: freshdesk-bot
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    networks:
+      - backend
+
+  cloudflared:
+    restart: unless-stopped
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-tunnel
+    command: tunnel --url http://bot:5000
+    networks:
+      - backend
+    depends_on:
+      - bot
+
+networks:
+  backend:
+    driver: bridge
