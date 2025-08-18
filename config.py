@@ -22,7 +22,7 @@ SLACK_BOT_TOKEN  = os.getenv("SLACK_BOT_TOKEN") or ""
 IT_GROUP_ID      = os.getenv("IT_GROUP_ID", "")
 
 # Behavior toggles
-ENABLE_WIZARD    = _as_bool(os.getenv("ENABLE_WIZARD"), False)
+ENABLE_WIZARD    = _as_bool(os.getenv("ENABLE_WIZARD"), True)
 WIZARD_CROSS_SECTION_CHILDREN = _as_bool(os.getenv("WIZARD_CROSS_SECTION_CHILDREN"), True)
 
 # Misc
