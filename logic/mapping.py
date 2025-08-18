@@ -135,12 +135,10 @@ def to_slack_block(field: dict):
         dep = field.get("dependent_fields") or []
         blocks = []
         for df in sorted(dep, key=lambda d: d.get("level", 99)):
-            dname = df.get("name")
-            dlabel = df.get("label_for_customers") or df.get("label") or dname
-            blocks.append({"type":"input","block_id":dname,
-                           "label":{"type":"plain_text","text":dlabel},
-                           "element":{"type":"plain_text_input","action_id":dname},
-                           "optional":not required,"dispatch_action":True})
+            ensure_choices(df)
+            fb = normalize_blocks(to_slack_block(df))
+            if fb:
+                blocks.extend(fb)
         return blocks
     else:
         log.info("Skipping unsupported type: %s (%s)", ftype, name)
