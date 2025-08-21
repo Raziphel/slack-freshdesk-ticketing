@@ -1,7 +1,11 @@
 from __future__ import annotations
 import time, uuid, logging
 from config import MAX_BLOCKS
-from services.freshdesk import get_form_detail, fd_get
+from services.freshdesk import (
+    get_form_detail,
+    get_ticket_forms_cached,
+    get_ticket_fields_cached,
+)
 from services.slack import slack_api
 from logic.forms import normalize_id_list
 from logic.mapping import to_slack_block, normalize_blocks, ensure_choices
@@ -133,8 +137,8 @@ def build_wizard_page_modal(form: dict, all_fields: list, token: str, page: int,
 # helpers used by routes (async flows)
 def open_wizard_first_page(view_id: str, ticket_form_id: int, view_hash: str | None):
     try:
-        forms = fd_get("/api/v2/ticket-forms")
-        fd_fields = fd_get("/api/v2/admin/ticket_fields")
+        forms = get_ticket_forms_cached()
+        fd_fields = get_ticket_fields_cached()
         form = next((f for f in forms if str(f["id"]) == str(ticket_form_id)), None)
         if not form:
             raise RuntimeError(f"Form {ticket_form_id} not found")
@@ -166,8 +170,8 @@ def update_wizard(view_id: str, token: str, view_hash: str | None, new_state_val
         elif nav == "prev": page -= 1
         sess["page"] = max(0, page)
 
-        forms = fd_get("/api/v2/ticket-forms")
-        fd_fields = fd_get("/api/v2/admin/ticket_fields")
+        forms = get_ticket_forms_cached()
+        fd_fields = get_ticket_fields_cached()
         form = next((f for f in forms if str(f["id"]) == str(sess["ticket_form_id"])), None)
         if not form:
             raise RuntimeError("Form not found for wizard session")

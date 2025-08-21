@@ -1,9 +1,11 @@
 from __future__ import annotations
+import time
 import requests
 import logging
 from config import FRESHDESK_DOMAIN, FRESHDESK_API_KEY, HTTP_TIMEOUT
 
 log = logging.getLogger(__name__)
+
 
 def fd_get(path: str):
     url = f"https://{FRESHDESK_DOMAIN}.freshdesk.com{path}"
@@ -13,6 +15,7 @@ def fd_get(path: str):
     r.raise_for_status()
     return r.json()
 
+
 def fd_post(path: str, payload: dict):
     url = f"https://{FRESHDESK_DOMAIN}.freshdesk.com{path}"
     r = requests.post(url, auth=(FRESHDESK_API_KEY, "X"), json=payload, timeout=HTTP_TIMEOUT)
@@ -21,8 +24,31 @@ def fd_post(path: str, payload: dict):
     r.raise_for_status()
     return r.json()
 
+
+# --- Cached helpers ------------------------------------------------------
+_FORMS_CACHE: dict[str, object] = {"expires": 0, "data": []}
+_FIELDS_CACHE: dict[str, object] = {"expires": 0, "data": []}
+
+
+def get_ticket_forms_cached(ttl: int = 300):
+    now = time.time()
+    if now >= _FORMS_CACHE["expires"]:
+        _FORMS_CACHE["data"] = fd_get("/api/v2/ticket-forms")
+        _FORMS_CACHE["expires"] = now + ttl
+    return _FORMS_CACHE["data"]
+
+
+def get_ticket_fields_cached(ttl: int = 300):
+    now = time.time()
+    if now >= _FIELDS_CACHE["expires"]:
+        _FIELDS_CACHE["data"] = fd_get("/api/v2/admin/ticket_fields")
+        _FIELDS_CACHE["expires"] = now + ttl
+    return _FIELDS_CACHE["data"]
+
+
 def get_form_detail(form_id: int):
     return fd_get(f"/api/v2/ticket-forms/{form_id}")
+
 
 def get_sections(field_id: int):
     path = f"/api/v2/admin/ticket_fields/{field_id}/sections"
@@ -40,6 +66,7 @@ def get_sections(field_id: int):
     except Exception as e:
         log.debug("No sections for field %s (%s)", field_id, e)
         return []
+
 
 def fetch_field_detail(field_id: int) -> dict | None:
     try:

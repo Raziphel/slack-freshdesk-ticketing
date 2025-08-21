@@ -2,7 +2,11 @@ from __future__ import annotations
 import json, logging, threading
 from flask import Blueprint, request, jsonify
 from config import ENABLE_WIZARD
-from services.freshdesk import fd_get
+from services.freshdesk import (
+    fd_get,
+    get_ticket_forms_cached,
+    get_ticket_fields_cached,
+)
 from services.slack import slack_api
 from logic.forms import filter_portal_forms
 from logic.single_page import build_form_fields_modal
@@ -27,22 +31,46 @@ def _notify_user_ticket_created(user_id: str, ticket_id: int) -> bool:
 @bp.route("/it-ticket", methods=["POST"])
 def it_ticket_command():
     trigger_id = request.form.get("trigger_id")
-    try:
-        forms_all = fd_get("/api/v2/ticket-forms")
-        forms = filter_portal_forms(forms_all)
-        modal = build_form_picker_modal(forms)
-        slack_api("views.open", {"trigger_id": trigger_id, "view": modal})
-    except Exception as e:
-        log.exception("Opening form picker failed: %s", e)
-        slack_api("views.open", {
-            "trigger_id": trigger_id,
-            "view": {
+    # Open a lightweight loading modal immediately to avoid trigger expiry
+    initial = slack_api(
+        "views.open",
+        {"trigger_id": trigger_id, "view": loading_modal("Loading forms...")},
+    )
+    view_info = initial.get("view") or {}
+    view_id = view_info.get("id")
+    view_hash = view_info.get("hash")
+
+    def _populate():
+        try:
+            forms = filter_portal_forms(get_ticket_forms_cached())
+            modal = build_form_picker_modal(forms)
+            payload = {"view_id": view_id, "view": modal}
+            if view_hash:
+                payload["hash"] = view_hash
+            try:
+                slack_api("views.update", payload)
+            except RuntimeError:
+                payload.pop("hash", None)
+                slack_api("views.update", payload)
+        except Exception as e:
+            log.exception("Opening form picker failed: %s", e)
+            err_view = {
                 "type": "modal",
                 "title": {"type": "plain_text", "text": "New IT Ticket"},
                 "close": {"type": "plain_text", "text": "Close"},
-                "blocks": [{"type": "section","text": {"type": "mrkdwn","text": f":warning: Failed to load forms.\n`{e}`"}}]
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f":warning: Failed to load forms.\n`{e}`",
+                        },
+                    }
+                ],
             }
-        })
+            slack_api("views.update", {"view_id": view_id, "view": err_view})
+
+    threading.Thread(target=_populate, daemon=True).start()
     return "", 200
 
 @bp.route("/interactions", methods=["POST"])
@@ -60,24 +88,32 @@ def interactions():
         if not chosen or chosen == "__noop__":
             return jsonify({"response_action": "errors","errors": {"form_select": "Please choose a ticket type"}}), 200
 
-        response = {"response_action": "update", "view": loading_modal("Loading form…")}
+        response = {"response_action": "update", "view": loading_modal("Loading form...")}
         if ENABLE_WIZARD:
-            threading.Thread(target=open_wizard_first_page, args=(view["id"], int(chosen), view.get("hash")), daemon=True).start()
+            threading.Thread(
+                target=open_wizard_first_page,
+                args=(view["id"], int(chosen), view.get("hash")),
+                daemon=True,
+            ).start()
         else:
             # single-page async update
             def _run():
                 try:
-                    forms = fd_get("/api/v2/ticket-forms")
-                    fd_fields = fd_get("/api/v2/admin/ticket_fields")
+                    forms = get_ticket_forms_cached()
+                    fd_fields = get_ticket_fields_cached()
                     form = next((f for f in forms if str(f["id"]) == str(chosen)), None)
                     updated = build_form_fields_modal(form, fd_fields, None)
                     from services.slack import slack_api
                     try:
-                        slack_api("views.update", {"view_id": view["id"], "hash": view.get("hash"), "view": updated})
+                        slack_api(
+                            "views.update",
+                            {"view_id": view["id"], "hash": view.get("hash"), "view": updated},
+                        )
                     except RuntimeError:
                         slack_api("views.update", {"view_id": view["id"], "view": updated})
                 except Exception as e:
                     log.exception("Async update failed: %s", e)
+
             threading.Thread(target=_run, daemon=True).start()
         return jsonify(response), 200
 
@@ -97,7 +133,11 @@ def interactions():
             for a in actions:
                 if a.get("action_id") == "wizard_next": nav = "next"
                 elif a.get("action_id") == "wizard_prev": nav = "prev"
-            threading.Thread(target=update_wizard, args=(view["id"], token, view.get("hash"), state_values, nav), daemon=True).start()
+            threading.Thread(
+                target=update_wizard,
+                args=(view["id"], token, view.get("hash"), state_values, nav),
+                daemon=True,
+            ).start()
             return "", 200
 
         # Single-page live update is optional; we skip here for simplicity
