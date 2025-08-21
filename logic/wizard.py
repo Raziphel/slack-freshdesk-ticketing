@@ -1,6 +1,6 @@
 from __future__ import annotations
 import time, uuid, logging
-from config import MAX_BLOCKS, WIZARD_CROSS_SECTION_CHILDREN
+from config import MAX_BLOCKS
 from services.freshdesk import get_form_detail, fd_get
 from services.slack import slack_api
 from logic.forms import normalize_id_list
@@ -11,48 +11,59 @@ log = logging.getLogger(__name__)
 
 WIZARD_SESSIONS: dict[str, dict] = {}  # token -> {"ticket_form_id":int, "page":int, "values":dict}
 
-def _field_in_section(field_obj: dict, section_id: int) -> bool:
-    maps = field_obj.get("section_mappings") or []
-    return any(m.get("section_id") == section_id for m in maps)
+def compute_pages(form: dict, all_fields: list, state_values: dict):
+    """Compute the sequence of wizard pages.
 
-def _field_has_section(field_obj: dict) -> bool:
-    maps = field_obj.get("section_mappings") or []
-    return bool(maps)
+    Pages are generated dynamically based on answered values. Each
+    field occupies its own page and any conditional children are added
+    after their parent once the triggering value has been supplied. A
+    trailing ``None`` sentinel marks the final submission step.
+    """
 
-def compute_pages(form: dict, all_fields: list):
     form_detail = get_form_detail(int(form["id"]))
-    ordered_section_ids = [s["id"] for s in sorted(form_detail.get("sections", []),
-                                                   key=lambda x: x.get("position", 9999))]
-    if not ordered_section_ids:
-        pages = ["core","general"]
-        log.info("Wizard pages for %s: %s (no sections; forcing General)", form.get("name") or form.get("id"), pages)
-        return pages
-
     raw = form_detail.get("fields") or form.get("fields") or []
-    id_order = normalize_id_list(raw); by_id = {f["id"]: f for f in all_fields}
-    has_unsectioned = False
-    for fid in id_order:
+    id_order = normalize_id_list(raw)
+    by_id = {f["id"]: f for f in all_fields}
+
+    pages: list[int | str | None] = ["core"]
+    visited: set[int] = set()
+
+    def add_field_and_children(fid: int):
+        if fid in visited:
+            return
+        visited.add(fid)
         f = by_id.get(fid)
         if not f or f.get("type") in {"default_subject","default_description"}:
-            continue
-        if not f.get("section_mappings"):
-            has_unsectioned = True; break
+            return
+        pages.append(fid)
+        selected = selected_value_for(f, state_values)
+        if selected is None:
+            return
+        sel = str(selected)
+        for sec in get_sections_cached(fid):
+            if sel not in activator_values(sec):
+                continue
+            for child_id in normalize_id_list(sec.get("fields") or []):
+                add_field_and_children(child_id)
 
-    pages = ["core"]
-    if has_unsectioned:
-        pages.append("general")
-    pages.extend(ordered_section_ids)
+    for fid in id_order:
+        add_field_and_children(fid)
+
+    pages.append(None)
     log.info("Wizard pages for %s: %s", form.get("name") or form.get("id"), pages)
     return pages
 
-def build_fields_for_page(form: dict, all_fields: list, state_values: dict, section_id: int | str):
-    by_id = {f["id"]: f for f in all_fields}
-    form_detail = get_form_detail(int(form["id"]))
-    sections_by_id = {s["id"]: s for s in form_detail.get("sections", [])}
-    raw = form_detail.get("fields") or form.get("fields") or []
-    id_order = normalize_id_list(raw)
+def build_fields_for_page(form: dict, all_fields: list, state_values: dict, page_item: int | str | None):
+    """Build Slack blocks for a given page item.
 
-    if section_id == "core":
+    ``page_item`` may be ``"core"`` for the subject/description step, an
+    integer field id for a single question, or ``None`` for the final
+    submission step.
+    """
+
+    by_id = {f["id"]: f for f in all_fields}
+
+    if page_item == "core":
         blocks = []
         subj = next((f for f in all_fields if f.get("type") == "default_subject"), None)
         desc = next((f for f in all_fields if f.get("type") == "default_description"), None)
@@ -63,113 +74,56 @@ def build_fields_for_page(form: dict, all_fields: list, state_values: dict, sect
             blocks.append({"type":"section","text":{"type":"mrkdwn","text":"_No core fields._"}})
         return blocks[:MAX_BLOCKS]
 
-    def in_this_page(f) -> bool:
-        if section_id == "general":
-            return not _field_has_section(f)
-        return _field_in_section(f, section_id)
+    if page_item is None:
+        return [{"type":"section","text":{"type":"mrkdwn","text":"_No more questions._"}}]
 
-    dependent_ids: set[int] = set()
-    for fid in id_order:
-        for sec in get_sections_cached(fid):
-            for cid in sec.get("fields") or []:
-                child = by_id.get(cid)
-                if child and in_this_page(child):
-                    dependent_ids.add(cid)
+    field_obj = by_id.get(page_item)
+    if not field_obj:
+        return [{"type":"section","text":{"type":"mrkdwn","text":"_Field not found._"}}]
 
-    fields_here = []
-    for fid in id_order:
-        f = by_id.get(fid)
-        if not f or f.get("type") in {"default_subject", "default_description"}:
-            continue
-        if in_this_page(f):
-            pos = 9999
-            maps = f.get("section_mappings") or []
-            if maps:
-                pos = sorted(maps, key=lambda m: m.get("position", 9999))[0].get("position", 9999)
-            fields_here.append((pos, f))
-    fields_here.sort(key=lambda t: t[0])
-
-    blocks = []
-    if section_id == "general":
-        blocks.append({"type":"header","text":{"type":"plain_text","text":"General"}})
-    else:
-        sec = sections_by_id.get(section_id)
-        if sec:
-            blocks.append({"type":"header","text":{"type":"plain_text","text":sec.get("name","Section")[:150]}})
-
-    added: set[str] = set()
-
-    def _append_field_tree_in_page(field_obj: dict):
-        nonlocal blocks, added
-        bid = field_obj.get("name")
-        if bid and bid in added:
-            return
-        ensure_choices(field_obj)
-        fb = normalize_blocks(to_slack_block(field_obj))
-        for bb in fb:
-            if bb and bb.get("type") == "input" and bb.get("block_id"):
-                added.add(bb["block_id"])
-        blocks.extend(fb)
-
-        secs = get_sections_cached(field_obj["id"])
-        if not secs:
-            return
-
-        selected = selected_value_for(field_obj, state_values)
-        if selected is None:
-            return
-
-        sel_str = str(selected)
-        for sec in secs:
-            if sel_str not in activator_values(sec):
-                continue
-            for child_id in sec.get("fields") or []:
-                child = by_id.get(child_id)
-                if not child:
-                    continue
-                belongs_here = in_this_page(child) or (WIZARD_CROSS_SECTION_CHILDREN and section_id != "core")
-                if belongs_here:
-                    _append_field_tree_in_page(child)
-
-    for _, f in fields_here:
-        if f["id"] in dependent_ids:
-            continue
-        _append_field_tree_in_page(f)
-
-    if not [b for b in blocks if b.get("type") == "input"]:
-        blocks.append({"type":"section","text":{"type":"mrkdwn","text":"_No visible fields on this step._"}})
-
-    return blocks[:MAX_BLOCKS]
+    ensure_choices(field_obj)
+    return normalize_blocks(to_slack_block(field_obj))[:MAX_BLOCKS]
 
 def build_wizard_page_modal(form: dict, all_fields: list, token: str, page: int, state_values: dict):
-    pages = compute_pages(form, all_fields)
+    pages = compute_pages(form, all_fields, state_values)
     total = len(pages)
-    page = max(0, min(page, total-1))
-    section_id = pages[page]
+    page = max(0, min(page, total - 1))
+    page_item = pages[page]
 
-    fields_blocks = build_fields_for_page(form, all_fields, state_values, section_id)
+    fields_blocks = build_fields_for_page(form, all_fields, state_values, page_item)
 
     nav_elems = []
     if page > 0:
-        nav_elems.append({"type":"button","action_id":"wizard_prev","text":{"type":"plain_text","text":"Back"},"value":token})
-    if page < total-1:
-        nav_elems.append({"type":"button","action_id":"wizard_next","text":{"type":"plain_text","text":"Next"},"style":"primary","value":token})
+        nav_elems.append({
+            "type": "button",
+            "action_id": "wizard_prev",
+            "text": {"type": "plain_text", "text": "Back"},
+            "value": token,
+        })
+    if page < total - 1:
+        nav_elems.append({
+            "type": "button",
+            "action_id": "wizard_next",
+            "text": {"type": "plain_text", "text": "Next"},
+            "style": "primary",
+            "value": token,
+        })
 
-    blocks = [{"type":"section","text":{"type":"mrkdwn","text":f"*Step {page+1} of {total}*"}}]
+    blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": f"*Step {page+1} of {total}*"}}]
     blocks.extend(fields_blocks)
     if nav_elems:
-        blocks.append({"type":"actions","block_id":"wizard_nav","elements":nav_elems})
+        blocks.append({"type": "actions", "block_id": "wizard_nav", "elements": nav_elems})
 
     view = {
-        "type":"modal",
-        "callback_id":"wizard_submit" if page == total-1 else "wizard_page",
-        "title":{"type":"plain_text","text":(form.get("name") or "New IT Ticket")[:24]},
-        "close":{"type":"plain_text","text":"Cancel" if page==0 else "Close"},
-        "blocks":blocks,
-        "private_metadata": _json_dumps({"ticket_form_id": form["id"], "wizard_token": token, "page_index": page})
+        "type": "modal",
+        "callback_id": "wizard_submit" if page_item is None else "wizard_page",
+        "title": {"type": "plain_text", "text": (form.get("name") or "New IT Ticket")[:24]},
+        "close": {"type": "plain_text", "text": "Cancel" if page == 0 else "Close"},
+        "blocks": blocks,
+        "private_metadata": _json_dumps({"ticket_form_id": form["id"], "wizard_token": token, "page_index": page}),
     }
-    if page == total-1:
-        view["submit"] = {"type":"plain_text","text":"Create"}
+    if page_item is None:
+        view["submit"] = {"type": "plain_text", "text": "Create"}
     return view
 
 # helpers used by routes (async flows)
