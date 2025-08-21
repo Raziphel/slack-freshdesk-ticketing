@@ -32,29 +32,32 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     pages: list[int | str | None] = []
     visited: set[int] = set()
 
-    def add_field_and_children(fid: int):
+    def add_field_and_children(fid: int) -> bool:
         if fid in visited:
-            return
+            return True
         visited.add(fid)
         f = by_id.get(fid)
         if not f or f.get("type") in {"default_subject","default_description"}:
-            return
+            return True
         ensure_choices(f)
         if not normalize_blocks(to_slack_block(f)):
-            return
+            return True
         pages.append(fid)
         selected = selected_value_for(f, state_values)
         if selected is None:
-            return
+            return False
         sel = str(selected)
         for sec in get_sections_cached(fid):
             if sel not in activator_values(sec):
                 continue
             for child_id in normalize_id_list(sec.get("fields") or []):
-                add_field_and_children(child_id)
+                if not add_field_and_children(child_id):
+                    return False
+        return True
 
     for fid in id_order:
-        add_field_and_children(fid)
+        if not add_field_and_children(fid):
+            break
 
     pages.append("core")
     pages.append(None)
