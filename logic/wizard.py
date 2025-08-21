@@ -56,16 +56,27 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
         if not normalize_blocks(to_slack_block(f)):
             return True
         pages.append(fid)
-        selected = selected_value_for(f, state_values)
-        if selected is None:
-            return False
-        sel = str(selected)
-        for sec in get_sections_cached(fid):
-            if sel not in activator_values(sec):
-                continue
-            for child_id in normalize_id_list(sec.get("fields") or []):
-                if not add_field_and_children(child_id):
-                    return False
+        # ``nested_field`` objects act as containers that render their
+        # dependent fields but do not store an answer themselves. Waiting for
+        # a value that never arrives causes the wizard to stop early after the
+        # nested block. We therefore skip the "expect an answer" step for these
+        # container fields so that subsequent questions continue to appear.
+        if f.get("type") != "nested_field":
+            selected = selected_value_for(f, state_values)
+            if selected is None:
+                return False
+            sel = str(selected)
+            for sec in get_sections_cached(fid):
+                if sel not in activator_values(sec):
+                    continue
+                for child_id in normalize_id_list(sec.get("fields") or []):
+                    if not add_field_and_children(child_id):
+                        return False
+            return True
+
+        # Nested fields don't have conditional sections at this level; their
+        # dependent inputs are already included in the blocks returned by
+        # ``to_slack_block``.
         return True
 
     for fid in id_order:
