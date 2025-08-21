@@ -46,7 +46,7 @@ def modal_values_to_fd_ticket(values: dict, ticket_form_id: int | None):
             subject = val
         elif block_id == "description":
             description = val
-        elif block_id == "type":
+        elif block_id in {"type", "ticket_type"}:
             type_field = val
         else:
             if val is not None and val != "__noop__":

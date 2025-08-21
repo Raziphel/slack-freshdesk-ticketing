@@ -13,6 +13,15 @@ from ui import loading_modal, build_form_picker_modal
 log = logging.getLogger(__name__)
 bp = Blueprint("core", __name__)
 
+
+def _notify_user_ticket_created(user_id: str, ticket_id: int):
+    try:
+        dm = slack_api("conversations.open", {"users": user_id})
+        channel_id = (dm.get("channel") or {}).get("id") or user_id
+        slack_api("chat.postMessage", {"channel": channel_id, "text": f"Ticket created: {ticket_id}"})
+    except Exception as e:
+        log.exception("Notify user failed: %s", e)
+
 @bp.route("/it-ticket", methods=["POST"])
 def it_ticket_command():
     trigger_id = request.form.get("trigger_id")
@@ -109,10 +118,7 @@ def interactions():
             log.info("✅ Ticket created: %s", ticket_id)
             user_id = (payload.get("user") or {}).get("id")
             if user_id and ticket_id:
-                try:
-                    slack_api("chat.postMessage", {"channel": user_id, "text": f"Ticket created: {ticket_id}"})
-                except Exception as e:
-                    log.exception("Notify user failed: %s", e)
+                _notify_user_ticket_created(user_id, ticket_id)
             return jsonify({"response_action": "clear"}), 200
         except Exception as e:
             log.exception("Ticket create failed: %s", e)
@@ -137,10 +143,7 @@ def interactions():
             log.info("✅ Ticket created: %s", ticket_id)
             user_id = (payload.get("user") or {}).get("id")
             if user_id and ticket_id:
-                try:
-                    slack_api("chat.postMessage", {"channel": user_id, "text": f"Ticket created: {ticket_id}"})
-                except Exception as e:
-                    log.exception("Notify user failed: %s", e)
+                _notify_user_ticket_created(user_id, ticket_id)
             if token and token in WIZARD_SESSIONS:
                 del WIZARD_SESSIONS[token]
             return jsonify({"response_action": "clear"}), 200
