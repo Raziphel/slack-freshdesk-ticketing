@@ -62,6 +62,7 @@ def modal_values_to_fd_ticket(values: dict, ticket_form_id: int | None):
 
     if custom_fields:
         ticket["custom_fields"] = custom_fields
-    if ticket_form_id:
-        ticket["ticket_form_id"] = ticket_form_id
+    # Freshdesk's ticket API rejects the ticket_form_id field, so we rely on
+    # the provided custom field values and tags for routing instead of
+    # explicitly setting a form.
     return ticket
