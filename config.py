@@ -39,7 +39,26 @@ PORTAL_FORMS_ORDER = [
     "Security Incident",
 ]
 
+# Friendly display names for Freshdesk forms
+FORM_NAME_TO_DISPLAY = {
+    "it_equipment_&_facility_support_form": "IT Equipment & Facility Support Form",
+    "system_access_request": "System Access Request",
+    "it_application_assistance_(not_access_related)": "IT Application Assistance (Not Access Related)",
+    "customer_notification_form": "Customer Notification Form",
+    "security_incident": "Security Incident",
+}
+
 # Map Freshdesk form names to valid ticket type values
 FORM_NAME_TO_TYPE = {
+    # Raw form name -> Freshdesk ticket type
+    "it_equipment_&_facility_support_form": "IT Equipment Support Form",
     "IT Equipment & Facility Support Form": "IT Equipment Support Form",
+    "system_access_request": "System Access Request",
+    "System Access Request": "System Access Request",
+    "it_application_assistance_(not_access_related)": "IT Application Assistance Request",
+    "IT Application Assistance (Not Access Related)": "IT Application Assistance Request",
+    "customer_notification_form": "IT Customer Notification Form",
+    "Customer Notification Form": "IT Customer Notification Form",
+    "security_incident": "Security Incident",
+    "Security Incident": "Security Incident",
 }

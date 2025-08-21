@@ -1,4 +1,5 @@
 import json
+from config import FORM_NAME_TO_DISPLAY
 
 def loading_modal(msg="Loading…"):
     return {
@@ -10,10 +11,14 @@ def loading_modal(msg="Loading…"):
     }
 
 def build_form_picker_modal(forms):
-    options = [{
-        "text": {"type": "plain_text", "text": f.get("name", f"Form {f.get('id')}")[:75]},
-        "value": str(f["id"])
-    } for f in forms]
+    options = []
+    for f in forms:
+        raw_name = f.get("name", f"Form {f.get('id')}")
+        label = FORM_NAME_TO_DISPLAY.get(raw_name, raw_name)
+        options.append({
+            "text": {"type": "plain_text", "text": label[:75]},
+            "value": str(f["id"])
+        })
 
     return {
         "type": "modal",
