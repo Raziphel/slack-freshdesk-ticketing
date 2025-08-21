@@ -14,13 +14,15 @@ log = logging.getLogger(__name__)
 bp = Blueprint("core", __name__)
 
 
-def _notify_user_ticket_created(user_id: str, ticket_id: int):
+def _notify_user_ticket_created(user_id: str, ticket_id: int) -> bool:
     try:
         dm = slack_api("conversations.open", {"users": user_id})
         channel_id = (dm.get("channel") or {}).get("id") or user_id
         slack_api("chat.postMessage", {"channel": channel_id, "text": f"Ticket created: {ticket_id}"})
+        return True
     except Exception as e:
         log.exception("Notify user failed: %s", e)
+        return False
 
 @bp.route("/it-ticket", methods=["POST"])
 def it_ticket_command():
@@ -117,9 +119,18 @@ def interactions():
             ticket_id = created.get("id")
             log.info("✅ Ticket created: %s", ticket_id)
             user_id = (payload.get("user") or {}).get("id")
-            if user_id and ticket_id:
-                _notify_user_ticket_created(user_id, ticket_id)
-            return jsonify({"response_action": "clear"}), 200
+            notified = _notify_user_ticket_created(user_id, ticket_id) if user_id and ticket_id else False
+            if notified:
+                return jsonify({"response_action": "clear"}), 200
+            success_view = {
+                "type": "modal",
+                "title": {"type": "plain_text", "text": "Ticket created"},
+                "close": {"type": "plain_text", "text": "Close"},
+                "blocks": [
+                    {"type": "section", "text": {"type": "mrkdwn", "text": f":white_check_mark: Ticket created: {ticket_id}"}}
+                ]
+            }
+            return jsonify({"response_action": "update", "view": success_view}), 200
         except Exception as e:
             log.exception("Ticket create failed: %s", e)
             return jsonify({"response_action": "errors","errors": {"subject": "Ticket creation failed. Please try again."}}), 200
@@ -142,11 +153,20 @@ def interactions():
             ticket_id = created.get("id")
             log.info("✅ Ticket created: %s", ticket_id)
             user_id = (payload.get("user") or {}).get("id")
-            if user_id and ticket_id:
-                _notify_user_ticket_created(user_id, ticket_id)
+            notified = _notify_user_ticket_created(user_id, ticket_id) if user_id and ticket_id else False
             if token and token in WIZARD_SESSIONS:
                 del WIZARD_SESSIONS[token]
-            return jsonify({"response_action": "clear"}), 200
+            if notified:
+                return jsonify({"response_action": "clear"}), 200
+            success_view = {
+                "type": "modal",
+                "title": {"type": "plain_text", "text": "Ticket created"},
+                "close": {"type": "plain_text", "text": "Close"},
+                "blocks": [
+                    {"type": "section", "text": {"type": "mrkdwn", "text": f":white_check_mark: Ticket created: {ticket_id}"}}
+                ]
+            }
+            return jsonify({"response_action": "update", "view": success_view}), 200
         except Exception as e:
             log.exception("Ticket create failed: %s", e)
             return jsonify({"response_action": "errors","errors": {"subject": "Ticket creation failed. Please try again."}}), 200
