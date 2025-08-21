@@ -131,8 +131,10 @@ def interactions():
             actions = payload.get("actions", []) or []
             nav = None
             for a in actions:
-                if a.get("action_id") == "wizard_next": nav = "next"
-                elif a.get("action_id") == "wizard_prev": nav = "prev"
+                if a.get("action_id") == "wizard_next":
+                    nav = "next"
+                elif a.get("action_id") == "wizard_prev":
+                    nav = "prev"
             threading.Thread(
                 target=update_wizard,
                 args=(view["id"], token, view.get("hash"), state_values, nav),
@@ -140,7 +142,23 @@ def interactions():
             ).start()
             return "", 200
 
-        # Single-page live update is optional; we skip here for simplicity
+        # Single-page live update: rebuild fields based on current selections
+        state_values = view.get("state", {}).get("values", {}) or {}
+        ticket_form_id = meta.get("ticket_form_id")
+        if ticket_form_id:
+            def _run_update():
+                try:
+                    forms = get_ticket_forms_cached()
+                    fd_fields = get_ticket_fields_cached()
+                    form = next((f for f in forms if str(f["id"]) == str(ticket_form_id)), None)
+                    updated = build_form_fields_modal(form, fd_fields, state_values)
+                    try:
+                        slack_api("views.update", {"view_id": view["id"], "hash": view.get("hash"), "view": updated})
+                    except RuntimeError:
+                        slack_api("views.update", {"view_id": view["id"], "view": updated})
+                except Exception as e:
+                    log.exception("Live update failed: %s", e)
+            threading.Thread(target=_run_update, daemon=True).start()
         return "", 200
 
     # Single-page submit
