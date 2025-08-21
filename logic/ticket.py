@@ -37,6 +37,7 @@ def resolve_proxy_value(field_name: str, proxy_or_value: str) -> str:
 def modal_values_to_fd_ticket(values: dict, ticket_form_id: int | None):
     subject = None
     description = None
+    type_field = None
     custom_fields = {}
 
     for block_id, entry in values.items():
@@ -45,6 +46,8 @@ def modal_values_to_fd_ticket(values: dict, ticket_form_id: int | None):
             subject = val
         elif block_id == "description":
             description = val
+        elif block_id == "type":
+            type_field = val
         else:
             if val is not None and val != "__noop__":
                 if isinstance(val, str) and val.startswith("hash:"):
@@ -64,6 +67,9 @@ def modal_values_to_fd_ticket(values: dict, ticket_form_id: int | None):
             ticket["group_id"] = int(IT_GROUP_ID)
         except ValueError:
             log.warning("⚠️ IT_GROUP_ID not an int; skipping")
+
+    if type_field:
+        ticket["type"] = type_field
 
     if custom_fields:
         ticket["custom_fields"] = custom_fields

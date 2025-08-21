@@ -105,7 +105,14 @@ def interactions():
             created = fd_get("/api/v2/admin/ticket_fields")  # dummy ping to keep token warm
             from services.freshdesk import fd_post
             created = fd_post("/api/v2/tickets", fd_ticket)
-            log.info("✅ Ticket created: %s", created.get("id"))
+            ticket_id = created.get("id")
+            log.info("✅ Ticket created: %s", ticket_id)
+            user_id = (payload.get("user") or {}).get("id")
+            if user_id and ticket_id:
+                try:
+                    slack_api("chat.postMessage", {"channel": user_id, "text": f"Ticket created: {ticket_id}"})
+                except Exception as e:
+                    log.exception("Notify user failed: %s", e)
             return jsonify({"response_action": "clear"}), 200
         except Exception as e:
             log.exception("Ticket create failed: %s", e)
@@ -126,7 +133,14 @@ def interactions():
         try:
             from services.freshdesk import fd_post
             created = fd_post("/api/v2/tickets", fd_ticket)
-            log.info("✅ Ticket created: %s", created.get("id"))
+            ticket_id = created.get("id")
+            log.info("✅ Ticket created: %s", ticket_id)
+            user_id = (payload.get("user") or {}).get("id")
+            if user_id and ticket_id:
+                try:
+                    slack_api("chat.postMessage", {"channel": user_id, "text": f"Ticket created: {ticket_id}"})
+                except Exception as e:
+                    log.exception("Notify user failed: %s", e)
             if token and token in WIZARD_SESSIONS:
                 del WIZARD_SESSIONS[token]
             return jsonify({"response_action": "clear"}), 200
