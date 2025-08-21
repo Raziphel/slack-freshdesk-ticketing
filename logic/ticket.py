@@ -1,6 +1,6 @@
 import hashlib, logging
 from config import FRESHDESK_EMAIL, IT_GROUP_ID
-from services.freshdesk import fd_get
+from services.freshdesk import fd_get, get_form_detail
 from logic.mapping import (
     extract_input,
     ensure_choices,
@@ -53,6 +53,14 @@ def modal_values_to_fd_ticket(values: dict, ticket_form_id: int | None):
                 if isinstance(val, str) and val.startswith("hash:"):
                     val = resolve_proxy_value(block_id, val)
                 custom_fields[block_id] = val
+
+    if not type_field and ticket_form_id:
+        try:
+            form = get_form_detail(int(ticket_form_id))
+            if isinstance(form, dict):
+                type_field = form.get("name")
+        except Exception as e:
+            log.warning("Could not derive type from form %s: %s", ticket_form_id, e)
 
     ticket = {
         "subject": subject or "New ticket",
