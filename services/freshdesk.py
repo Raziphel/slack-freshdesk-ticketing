@@ -2,14 +2,20 @@ from __future__ import annotations
 import time
 import requests
 import logging
+from requests.adapters import HTTPAdapter
 from config import FRESHDESK_DOMAIN, FRESHDESK_API_KEY, HTTP_TIMEOUT
 
 log = logging.getLogger(__name__)
 
 
+_session = requests.Session()
+_session.auth = (FRESHDESK_API_KEY, "X")
+_session.mount("https://", HTTPAdapter(pool_connections=20, pool_maxsize=20))
+
+
 def fd_get(path: str):
     url = f"https://{FRESHDESK_DOMAIN}.freshdesk.com{path}"
-    r = requests.get(url, auth=(FRESHDESK_API_KEY, "X"), timeout=HTTP_TIMEOUT)
+    r = _session.get(url, timeout=HTTP_TIMEOUT)
     if not r.ok:
         log.error("❌ FD GET %s -> %s", path, r.text[:800])
     r.raise_for_status()
@@ -18,7 +24,7 @@ def fd_get(path: str):
 
 def fd_post(path: str, payload: dict):
     url = f"https://{FRESHDESK_DOMAIN}.freshdesk.com{path}"
-    r = requests.post(url, auth=(FRESHDESK_API_KEY, "X"), json=payload, timeout=HTTP_TIMEOUT)
+    r = _session.post(url, json=payload, timeout=HTTP_TIMEOUT)
     if not r.ok:
         log.error("❌ FD POST %s -> %s", path, r.text[:800])
     r.raise_for_status()
@@ -54,7 +60,7 @@ def get_sections(field_id: int):
     path = f"/api/v2/admin/ticket_fields/{field_id}/sections"
     url = f"https://{FRESHDESK_DOMAIN}.freshdesk.com{path}"
     try:
-        r = requests.get(url, auth=(FRESHDESK_API_KEY, "X"), timeout=HTTP_TIMEOUT)
+        r = _session.get(url, timeout=HTTP_TIMEOUT)
         if not r.ok:
             # Freshdesk returns 400/404/422 when a field has no
             # conditional sections configured. These responses are
