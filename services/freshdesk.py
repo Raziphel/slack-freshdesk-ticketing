@@ -30,11 +30,12 @@ def get_sections(field_id: int):
     try:
         r = requests.get(url, auth=(FRESHDESK_API_KEY, "X"), timeout=HTTP_TIMEOUT)
         if not r.ok:
-            if r.status_code in (400, 404):
-                log.debug("No sections for field %s (%s)", field_id, r.status_code)
-                return []
-            log.error("❌ FD GET %s -> %s", path, r.text[:800])
-            r.raise_for_status()
+            # Freshdesk returns 400/404/422 when a field has no
+            # conditional sections configured. These responses are
+            # expected during wizard traversal so we quietly treat
+            # them as "no sections" instead of logging noisy errors.
+            log.debug("No sections for field %s (%s)", field_id, r.status_code)
+            return []
         return r.json() or []
     except Exception as e:
         log.debug("No sections for field %s (%s)", field_id, e)
