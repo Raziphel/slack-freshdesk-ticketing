@@ -167,11 +167,8 @@ def update_wizard(view_id: str, token: str, view_hash: str | None, new_state_val
         sess = WIZARD_SESSIONS.get(token)
         if not sess:
             raise RuntimeError("Wizard session expired")
+        # Merge incoming view state
         sess["values"] = {**(sess.get("values") or {}), **(new_state_values or {})}
-        page = int(sess.get("page", 0))
-        if nav == "next": page += 1
-        elif nav == "prev": page -= 1
-        sess["page"] = max(0, page)
 
         forms = get_ticket_forms_cached()
         fd_fields = get_ticket_fields_cached()
@@ -179,7 +176,41 @@ def update_wizard(view_id: str, token: str, view_hash: str | None, new_state_val
         if not form:
             raise RuntimeError("Form not found for wizard session")
 
-        view = build_wizard_page_modal(form, fd_fields, token, sess["page"], sess["values"])
+        # Determine current page item and compute navigation relative to
+        # the freshly generated page sequence. This avoids glitches where
+        # unrelated fields appear or pages repeat when conditional
+        # branches change.
+        pages = compute_pages(form, fd_fields, sess["values"])
+        # Drop stale answers for fields no longer in the current flow so
+        # that unrelated branches are ignored.
+        by_id = {f.get("id"): f for f in fd_fields}
+        valid_names = set()
+        for item in pages:
+            if isinstance(item, int):
+                f = by_id.get(item)
+                if f and f.get("name"):
+                    valid_names.add(f["name"])
+        sess["values"] = {k: v for k, v in sess["values"].items() if k in valid_names}
+
+        page = max(0, min(int(sess.get("page", 0)), len(pages) - 1))
+        current_item = pages[page]
+
+        if nav == "next":
+            # Don't advance unless the current field has a value when the
+            # page represents a specific field id.
+            allow_advance = True
+            if isinstance(current_item, int):
+                field_obj = next((f for f in fd_fields if f.get("id") == current_item), None)
+                if field_obj and selected_value_for(field_obj, sess["values"]) is None:
+                    allow_advance = False
+            if allow_advance:
+                page = min(page + 1, len(pages) - 1)
+        elif nav == "prev":
+            page = max(page - 1, 0)
+
+        sess["page"] = page
+
+        view = build_wizard_page_modal(form, fd_fields, token, page, sess["values"])
         try:
             slack_api("views.update", {"view_id": view_id, "hash": view_hash, "view": view})
         except RuntimeError as e:
