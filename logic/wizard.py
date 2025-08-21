@@ -29,6 +29,19 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     id_order = normalize_id_list(raw)
     by_id = {f["id"]: f for f in all_fields}
 
+    # Fields that participate in conditional sections appear twice in the
+    # Freshdesk form payload: once as stand‑alone entries in ``fields`` and
+    # again via their parent section mappings. When the wizard iterates over
+    # ``id_order`` these orphaned child entries could surface even when their
+    # activating choice wasn't selected, leading to unrelated questions like
+    # the JumpCloud issue field showing up for "Other SaaS Applications".
+    #
+    # To avoid this we drop any field that has ``section_mappings`` from the
+    # top‑level order and rely on ``get_sections`` to include them only when
+    # their parent condition is met. This mirrors Freshdesk's behaviour and
+    # keeps the wizard pages aligned with the selected branch.
+    id_order = [fid for fid in id_order if not by_id.get(fid, {}).get("section_mappings")]
+
     pages: list[int | str | None] = []
     visited: set[int] = set()
 
