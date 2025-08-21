@@ -25,10 +25,19 @@ def get_form_detail(form_id: int):
     return fd_get(f"/api/v2/ticket-forms/{form_id}")
 
 def get_sections(field_id: int):
+    path = f"/api/v2/admin/ticket_fields/{field_id}/sections"
+    url = f"https://{FRESHDESK_DOMAIN}.freshdesk.com{path}"
     try:
-        return fd_get(f"/api/v2/admin/ticket_fields/{field_id}/sections") or []
+        r = requests.get(url, auth=(FRESHDESK_API_KEY, "X"), timeout=HTTP_TIMEOUT)
+        if r.status_code in (400, 404):
+            log.debug("No sections for field %s (%s)", field_id, r.status_code)
+            return []
+        if not r.ok:
+            log.error("❌ FD GET %s -> %s", path, r.text[:800])
+        r.raise_for_status()
+        return r.json() or []
     except Exception as e:
-        logging.info("No sections for field %s (%s)", field_id, e)
+        log.debug("No sections for field %s (%s)", field_id, e)
         return []
 
 def fetch_field_detail(field_id: int) -> dict | None:
