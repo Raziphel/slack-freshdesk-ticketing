@@ -1,14 +1,19 @@
 import requests
 import logging
 from functools import lru_cache
+from requests.adapters import HTTPAdapter
 from config import SLACK_BOT_TOKEN, HTTP_TIMEOUT
 
 log = logging.getLogger(__name__)
 
+_session = requests.Session()
+_session.headers.update({"Authorization": f"Bearer {SLACK_BOT_TOKEN}", "Content-Type": "application/json"})
+_session.mount("https://", HTTPAdapter(pool_connections=20, pool_maxsize=20))
+
+
 def slack_api(method: str, payload: dict):
-    r = requests.post(
+    r = _session.post(
         f"https://slack.com/api/{method}",
-        headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}", "Content-Type": "application/json"},
         json=payload,
         timeout=HTTP_TIMEOUT
     )
