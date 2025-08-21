@@ -25,7 +25,7 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     id_order = normalize_id_list(raw)
     by_id = {f["id"]: f for f in all_fields}
 
-    pages: list[int | str | None] = ["core"]
+    pages: list[int | str | None] = []
     visited: set[int] = set()
 
     def add_field_and_children(fid: int):
@@ -52,6 +52,7 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     for fid in id_order:
         add_field_and_children(fid)
 
+    pages.append("core")
     pages.append(None)
     log.info("Wizard pages for %s: %s", form.get("name") or form.get("id"), pages)
     return pages
