@@ -1,7 +1,12 @@
 import hashlib, logging
 from config import FRESHDESK_EMAIL, IT_GROUP_ID
 from services.freshdesk import fd_get
-from logic.mapping import extract_input, ensure_choices, get_field_choices
+from logic.mapping import (
+    extract_input,
+    ensure_choices,
+    get_field_choices,
+    iter_choice_items,
+)
 
 log = logging.getLogger(__name__)
 
@@ -18,7 +23,7 @@ def resolve_proxy_value(field_name: str, proxy_or_value: str) -> str:
 
     ensure_choices(target)
     choices = get_field_choices(target) or {}
-    items = list(choices.items()) if isinstance(choices, dict) else [(str(v), str(v)) for v in choices]
+    items = list(iter_choice_items(choices))
 
     want = val[5:]
     for raw_value, _lbl in items:
