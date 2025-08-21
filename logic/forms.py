@@ -9,9 +9,12 @@ def filter_portal_forms(forms: list[dict]):
 
     if ALLOWED_FORM_IDS:
         by_id = {str(f.get("id")): f for f in forms}
+        missing = [i for i in ALLOWED_FORM_IDS if i not in by_id]
         filtered = [by_id[i] for i in ALLOWED_FORM_IDS if i in by_id]
+        if missing:
+            log.warning("Missing ALLOWED_FORM_IDS: %s", missing)
         if filtered:
-            log.info("Using ALLOWED_FORM_IDS: %s", ALLOWED_FORM_IDS)
+            log.info("Using ALLOWED_FORM_IDS: %s", [f.get("id") for f in filtered])
             return filtered
         log.warning("No matching forms for ALLOWED_FORM_IDS=%s; falling back to all", ALLOWED_FORM_IDS)
         return forms
