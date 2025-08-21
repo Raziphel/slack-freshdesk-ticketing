@@ -1,5 +1,5 @@
 import hashlib, logging
-from config import FRESHDESK_EMAIL, IT_GROUP_ID
+from config import FRESHDESK_EMAIL, IT_GROUP_ID, FORM_NAME_TO_TYPE
 from services.freshdesk import fd_get, get_form_detail
 from logic.mapping import (
     extract_input,
@@ -58,7 +58,8 @@ def modal_values_to_fd_ticket(values: dict, ticket_form_id: int | None):
         try:
             form = get_form_detail(int(ticket_form_id))
             if isinstance(form, dict):
-                type_field = form.get("name")
+                name = form.get("name")
+                type_field = FORM_NAME_TO_TYPE.get(name, name)
         except Exception as e:
             log.warning("Could not derive type from form %s: %s", ticket_form_id, e)
 

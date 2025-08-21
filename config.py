@@ -38,3 +38,8 @@ PORTAL_FORMS_ORDER = [
     "Customer Notification Form",
     "Security Incident",
 ]
+
+# Map Freshdesk form names to valid ticket type values
+FORM_NAME_TO_TYPE = {
+    "IT Equipment & Facility Support Form": "IT Equipment Support Form",
+}
