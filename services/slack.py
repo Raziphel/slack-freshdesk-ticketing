@@ -1,5 +1,6 @@
 import requests
 import logging
+from functools import lru_cache
 from config import SLACK_BOT_TOKEN, HTTP_TIMEOUT
 
 log = logging.getLogger(__name__)
@@ -21,3 +22,14 @@ def slack_api(method: str, payload: dict):
             log.error("❌ Slack %s error: %s", method, data)
         raise RuntimeError(data)
     return data
+
+
+@lru_cache(maxsize=512)
+def get_user_email(user_id: str) -> str | None:
+    """Return the email address for a Slack user, if available."""
+    try:
+        info = slack_api("users.info", {"user": user_id})
+        return ((info.get("user") or {}).get("profile") or {}).get("email")
+    except Exception as e:
+        log.warning("Could not fetch email for %s: %s", user_id, e)
+        return None

@@ -7,7 +7,7 @@ from services.freshdesk import (
     get_ticket_forms_cached,
     get_ticket_fields_cached,
 )
-from services.slack import slack_api
+from services.slack import slack_api, get_user_email
 from logic.forms import filter_portal_forms
 from logic.single_page import build_form_fields_modal
 from logic.wizard import open_wizard_first_page, update_wizard, WIZARD_SESSIONS
@@ -151,14 +151,15 @@ def interactions():
         except json.JSONDecodeError:
             meta = {}
         ticket_form_id = meta.get("ticket_form_id")
-        fd_ticket = modal_values_to_fd_ticket(values, ticket_form_id)
+        user_id = (payload.get("user") or {}).get("id")
+        user_email = get_user_email(user_id) if user_id else None
+        fd_ticket = modal_values_to_fd_ticket(values, ticket_form_id, user_email)
         try:
             created = fd_get("/api/v2/admin/ticket_fields")  # dummy ping to keep token warm
             from services.freshdesk import fd_post
             created = fd_post("/api/v2/tickets", fd_ticket)
             ticket_id = created.get("id")
             log.info("✅ Ticket created: %s", ticket_id)
-            user_id = (payload.get("user") or {}).get("id")
             notified = _notify_user_ticket_created(user_id, ticket_id) if user_id and ticket_id else False
             if notified:
                 return jsonify({"response_action": "clear"}), 200
@@ -186,13 +187,14 @@ def interactions():
         merged.update(view.get("state", {}).get("values", {}) or {})
         ticket_form_id = (session or {}).get("ticket_form_id") or meta.get("ticket_form_id")
 
-        fd_ticket = modal_values_to_fd_ticket(merged, ticket_form_id)
+        user_id = (payload.get("user") or {}).get("id")
+        user_email = get_user_email(user_id) if user_id else None
+        fd_ticket = modal_values_to_fd_ticket(merged, ticket_form_id, user_email)
         try:
             from services.freshdesk import fd_post
             created = fd_post("/api/v2/tickets", fd_ticket)
             ticket_id = created.get("id")
             log.info("✅ Ticket created: %s", ticket_id)
-            user_id = (payload.get("user") or {}).get("id")
             notified = _notify_user_ticket_created(user_id, ticket_id) if user_id and ticket_id else False
             if token and token in WIZARD_SESSIONS:
                 del WIZARD_SESSIONS[token]

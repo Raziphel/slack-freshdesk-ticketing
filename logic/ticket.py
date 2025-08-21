@@ -34,7 +34,7 @@ def resolve_proxy_value(field_name: str, proxy_or_value: str) -> str:
     log.warning("Could not resolve proxy for field %s: no choice matched hash", field_name)
     return val
 
-def modal_values_to_fd_ticket(values: dict, ticket_form_id: int | None):
+def modal_values_to_fd_ticket(values: dict, ticket_form_id: int | None, requester_email: str | None = None):
     subject = None
     description = None
     type_field = None
@@ -68,8 +68,8 @@ def modal_values_to_fd_ticket(values: dict, ticket_form_id: int | None):
         "description": description or "(no description)",
         "status": 2,
         "priority": 2,
-        "email": FRESHDESK_EMAIL,
-        "tags": ["slack", "it-ticket"]
+        "email": requester_email or FRESHDESK_EMAIL,
+        "tags": ["slack", "it-ticket"],
     }
     if IT_GROUP_ID:
         try:
