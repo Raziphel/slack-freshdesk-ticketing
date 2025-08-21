@@ -35,6 +35,9 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
         f = by_id.get(fid)
         if not f or f.get("type") in {"default_subject","default_description"}:
             return
+        ensure_choices(f)
+        if not normalize_blocks(to_slack_block(f)):
+            return
         pages.append(fid)
         selected = selected_value_for(f, state_values)
         if selected is None:
