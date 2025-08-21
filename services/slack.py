@@ -14,6 +14,10 @@ def slack_api(method: str, payload: dict):
     r.raise_for_status()
     data = r.json()
     if not data.get("ok"):
-        log.error("❌ Slack %s error: %s", method, data)
+        if data.get("error") == "hash_conflict":
+            # Another process updated the view; caller will retry without hash.
+            log.debug("Slack %s hash_conflict: %s", method, data)
+        else:
+            log.error("❌ Slack %s error: %s", method, data)
         raise RuntimeError(data)
     return data

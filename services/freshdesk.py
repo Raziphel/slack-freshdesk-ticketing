@@ -29,12 +29,12 @@ def get_sections(field_id: int):
     url = f"https://{FRESHDESK_DOMAIN}.freshdesk.com{path}"
     try:
         r = requests.get(url, auth=(FRESHDESK_API_KEY, "X"), timeout=HTTP_TIMEOUT)
-        if r.status_code in (400, 404):
-            log.debug("No sections for field %s (%s)", field_id, r.status_code)
-            return []
         if not r.ok:
+            if r.status_code in (400, 404):
+                log.debug("No sections for field %s (%s)", field_id, r.status_code)
+                return []
             log.error("❌ FD GET %s -> %s", path, r.text[:800])
-        r.raise_for_status()
+            r.raise_for_status()
         return r.json() or []
     except Exception as e:
         log.debug("No sections for field %s (%s)", field_id, e)
