@@ -1,5 +1,7 @@
 from __future__ import annotations
 import time
+import json
+from pathlib import Path
 import requests
 import logging
 from requests.adapters import HTTPAdapter
@@ -34,6 +36,19 @@ def fd_post(path: str, payload: dict):
 # --- Cached helpers ------------------------------------------------------
 _FORMS_CACHE: dict[str, object] = {"expires": 0, "data": []}
 _FIELDS_CACHE: dict[str, object] = {"expires": 0, "data": []}
+
+# Attempt to warm the fields cache from the bundled JSON snapshot. If the
+# file exists we keep the data indefinitely and avoid an API call during
+# startup. Missing or malformed files simply fall back to the live API.
+_FIELDS_FILE = Path(__file__).resolve().parent.parent / "ticket_fields.json"
+if _FIELDS_FILE.exists():
+    try:
+        with _FIELDS_FILE.open("r", encoding="utf-8") as fh:
+            _FIELDS_CACHE["data"] = json.load(fh)
+            _FIELDS_CACHE["expires"] = float("inf")
+            log.info("Loaded %d ticket fields from %s", len(_FIELDS_CACHE["data"]), _FIELDS_FILE)
+    except Exception as e:  # pragma: no cover - best effort only
+        log.warning("Failed to load %s: %s", _FIELDS_FILE, e)
 
 
 def get_ticket_forms_cached(ttl: int = 300):
