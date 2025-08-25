@@ -21,6 +21,8 @@ FRESHDESK_EMAIL  = os.getenv("FRESHDESK_EMAIL") or ""
 SLACK_BOT_TOKEN  = os.getenv("SLACK_BOT_TOKEN") or ""
 IT_GROUP_ID      = os.getenv("IT_GROUP_ID", "")
 PORTAL_TICKET_FORM_URL = os.getenv("PORTAL_TICKET_FORM_URL") or f"https://{FRESHDESK_DOMAIN}.freshdesk.com/support/tickets/new"
+# Let me point the bot at whatever question flow file I want without touching the code
+QUESTION_FLOW_FILE = os.getenv("QUESTION_FLOW_FILE", "question_flow.json")
 
 # Behavior toggles
 ENABLE_WIZARD    = _as_bool(os.getenv("ENABLE_WIZARD"), True)
