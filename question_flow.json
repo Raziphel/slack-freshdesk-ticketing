@@ -1,0 +1,27 @@
+[
+  {
+    "id": "issue_type",
+    "question": "What kind of issue am I dealing with?",
+    "type": "select",
+    "options": ["Hardware", "Software"],
+    "next": {"Hardware": "hardware_serial", "Software": "software_details"}
+  },
+  {
+    "id": "hardware_serial",
+    "question": "What's the serial number of the hardware?",
+    "type": "text",
+    "next": "final_details"
+  },
+  {
+    "id": "software_details",
+    "question": "Which software is acting up?",
+    "type": "text",
+    "next": "final_details"
+  },
+  {
+    "id": "final_details",
+    "question": "Anything else I should know?",
+    "type": "text",
+    "next": null
+  }
+]
