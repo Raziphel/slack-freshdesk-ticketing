@@ -13,14 +13,37 @@ def build_fields_for_form(form: dict, all_fields: list, state_values: dict | Non
     sections = {s["id"]: s for s in form_detail.get("sections", [])}
     ordered_section_ids = [s["id"] for s in sorted(form_detail.get("sections", []),
                                                    key=lambda x: x.get("position", 9999))]
+    form_section_ids = set(sections.keys())
 
     raw = form_detail.get("fields") or form.get("fields") or []
     id_order = normalize_id_list(raw)
+
+    def _section_orphan(fid: int) -> bool:
+        f = by_id.get(fid) or {}
+        mappings = f.get("section_mappings") or []
+        if not mappings:
+            return False
+        for m in mappings:
+            try:
+                sid = int(m.get("section_id"))
+            except (TypeError, ValueError):
+                continue
+            if sid in form_section_ids:
+                return False
+        return True
+
+    id_order = [fid for fid in id_order if not _section_orphan(fid)]
 
     # children map
     dependent_ids: set[int] = set()
     for fid in id_order:
         for sec in get_sections_cached(fid):
+            try:
+                sid = int(sec.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if sid not in form_section_ids:
+                continue
             for cid in sec.get("fields") or []:
                 dependent_ids.add(cid)
 
@@ -47,7 +70,10 @@ def build_fields_for_form(form: dict, all_fields: list, state_values: dict | Non
                 added.add(bb["block_id"])
         blocks.extend(fb)
 
-        secs = get_sections_cached(field_obj["id"])
+        secs = [
+            s for s in get_sections_cached(field_obj["id"])
+            if (s.get("id") in form_section_ids)
+        ]
         if not secs:
             return
         selected = selected_value_for(field_obj, state_values)

@@ -28,6 +28,7 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     raw = form_detail.get("fields") or form.get("fields") or []
     id_order = normalize_id_list(raw)
     by_id = {f["id"]: f for f in all_fields}
+    form_section_ids = {s.get("id") for s in form_detail.get("sections") or []}
 
     # Track fields that are referenced as dependents elsewhere so we can
     # identify standalone required fields that don't apply to the user's
@@ -52,9 +53,34 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     conditional_children: set[int] = set()
     for fid in id_order:
         for sec in get_sections_cached(fid):
+            try:
+                sid = int(sec.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if sid not in form_section_ids:
+                continue
             conditional_children.update(normalize_id_list(sec.get("fields") or []))
     dependent_ids.update(conditional_children)
-    id_order = [fid for fid in id_order if fid not in conditional_children]
+
+    def _section_orphan(fid: int) -> bool:
+        f = by_id.get(fid) or {}
+        mappings = f.get("section_mappings") or []
+        if not mappings:
+            return False
+        for m in mappings:
+            try:
+                sid = int(m.get("section_id"))
+            except (TypeError, ValueError):
+                continue
+            if sid in form_section_ids:
+                return False
+        return True
+
+    id_order = [
+        fid
+        for fid in id_order
+        if fid not in conditional_children and not _section_orphan(fid)
+    ]
 
     # Ignore mandatory fields that aren't dependent on any previous answer.
     # These are often global requirements for customer portals but aren't
@@ -96,6 +122,12 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
                 return False
             sel = str(selected)
             for sec in get_sections_cached(fid):
+                try:
+                    sid = int(sec.get("id"))
+                except (TypeError, ValueError):
+                    continue
+                if sid not in form_section_ids:
+                    continue
                 if sel not in activator_values(sec):
                     continue
                 for child_id in normalize_id_list(sec.get("fields") or []):
