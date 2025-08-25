@@ -206,7 +206,8 @@ def update_wizard(view_id: str, token: str, view_hash: str | None, new_state_val
         # branches change.
         pages = compute_pages(form, fd_fields, sess["values"])
         # Drop stale answers for fields no longer in the current flow so
-        # that unrelated branches are ignored.
+        # that unrelated branches are ignored. Recompute pages after
+        # trimming to reflect any removed branches.
         by_id = {f.get("id"): f for f in fd_fields}
         valid_names = set()
         for item in pages:
@@ -215,6 +216,7 @@ def update_wizard(view_id: str, token: str, view_hash: str | None, new_state_val
                 if f and f.get("name"):
                     valid_names.add(f["name"])
         sess["values"] = {k: v for k, v in sess["values"].items() if k in valid_names}
+        pages = compute_pages(form, fd_fields, sess["values"])
 
         page = max(0, min(int(sess.get("page", 0)), len(pages) - 1))
         current_item = pages[page]
