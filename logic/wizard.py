@@ -41,6 +41,15 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
                 dependent_ids.add(int(dep.get("id")))
             except (TypeError, ValueError):
                 continue
+        # Fields mapped to sections are conditional on another answer and
+        # should only appear when the triggering question is shown. Treat
+        # them as dependents even if the parent field isn't part of the
+        # form so that they don't surface unexpectedly.
+        if f.get("section_mappings"):
+            try:
+                dependent_ids.add(int(f.get("id")))
+            except (TypeError, ValueError):
+                continue
 
     # Fields that appear exclusively inside conditional sections are listed
     # both in ``fields`` and within their parent section definition. Showing
@@ -54,7 +63,12 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
         for sec in get_sections_cached(fid):
             conditional_children.update(normalize_id_list(sec.get("fields") or []))
     dependent_ids.update(conditional_children)
-    id_order = [fid for fid in id_order if fid not in conditional_children]
+    id_order = [
+        fid
+        for fid in id_order
+        if fid not in conditional_children
+        and not by_id.get(fid, {}).get("section_mappings")
+    ]
 
     # Ignore mandatory fields that aren't dependent on any previous answer.
     # These are often global requirements for customer portals but aren't
