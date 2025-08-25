@@ -20,7 +20,6 @@ FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY") or ""
 FRESHDESK_EMAIL  = os.getenv("FRESHDESK_EMAIL") or ""
 SLACK_BOT_TOKEN  = os.getenv("SLACK_BOT_TOKEN") or ""
 IT_GROUP_ID      = os.getenv("IT_GROUP_ID", "")
-PORTAL_TICKET_FORM_URL = os.getenv("PORTAL_TICKET_FORM_URL") or f"https://{FRESHDESK_DOMAIN}.freshdesk.com/support/tickets/new"
 
 # Behavior toggles
 ENABLE_WIZARD    = _as_bool(os.getenv("ENABLE_WIZARD"), True)
