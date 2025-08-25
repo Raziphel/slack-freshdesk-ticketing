@@ -4,14 +4,8 @@ import json
 from pathlib import Path
 import requests
 import logging
-from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
-from config import (
-    FRESHDESK_DOMAIN,
-    FRESHDESK_API_KEY,
-    HTTP_TIMEOUT,
-    PORTAL_TICKET_FORM_URL,
-)
+from config import FRESHDESK_DOMAIN, FRESHDESK_API_KEY, HTTP_TIMEOUT
 
 log = logging.getLogger(__name__)
 
@@ -37,62 +31,6 @@ def fd_post(path: str, payload: dict):
         log.error("❌ FD POST %s -> %s", path, r.text[:800])
     r.raise_for_status()
     return r.json()
-
-
-# --- Portal scraping ------------------------------------------------------
-
-def _scrape_portal_fields() -> list[dict]:
-    """Parse ticket fields from the public Freshdesk portal form.
-
-    This is used as a fallback when the Freshdesk API cannot be queried for
-    ticket field metadata. The parser extracts labels, input names, and any
-    select options from the ``/support/tickets/new`` HTML page. The resulting
-    structure is simplified compared to the API response but sufficient for
-    building a basic question flow.
-    """
-
-    try:
-        resp = requests.get(PORTAL_TICKET_FORM_URL, timeout=HTTP_TIMEOUT)
-        resp.raise_for_status()
-    except Exception as e:
-        log.error("❌ Failed to fetch portal form %s (%s)", PORTAL_TICKET_FORM_URL, e)
-        return []
-
-    soup = BeautifulSoup(resp.text, "html.parser")
-    form = soup.find("form")
-    if not form:
-        return []
-
-    fields: list[dict] = []
-    for label in form.find_all("label"):
-        field_id = label.get("for")
-        if not field_id:
-            continue
-        input_el = form.find(id=field_id)
-        if input_el is None:
-            continue
-
-        name = input_el.get("name") or field_id
-        field_type = input_el.name
-        choices = []
-        if field_type == "select":
-            for opt in input_el.find_all("option"):
-                value = opt.get("value")
-                text = opt.get_text(strip=True)
-                if value is None:
-                    continue
-                choices.append({"value": value, "label": text})
-
-        fields.append(
-            {
-                "id": name,
-                "label": label.get_text(strip=True),
-                "type": field_type,
-                "choices": choices,
-            }
-        )
-
-    return fields
 
 
 # --- Cached helpers ------------------------------------------------------
@@ -126,11 +64,7 @@ def get_ticket_forms_cached(ttl: int = 300):
 def get_ticket_fields_cached(ttl: int = 300):
     now = time.time()
     if now >= _FIELDS_CACHE["expires"]:
-        try:
-            _FIELDS_CACHE["data"] = fd_get("/api/v2/admin/ticket_fields")
-        except Exception as e:
-            log.warning("Ticket fields API failed (%s); falling back to portal scrape", e)
-            _FIELDS_CACHE["data"] = _scrape_portal_fields()
+        _FIELDS_CACHE["data"] = fd_get("/api/v2/admin/ticket_fields")
         _FIELDS_CACHE["expires"] = now + ttl
     return _FIELDS_CACHE["data"]
 
