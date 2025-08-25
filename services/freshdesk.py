@@ -4,8 +4,9 @@ import json
 from pathlib import Path
 import requests
 import logging
+from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
-from config import FRESHDESK_DOMAIN, FRESHDESK_API_KEY, HTTP_TIMEOUT
+from config import FRESHDESK_DOMAIN, FRESHDESK_API_KEY, HTTP_TIMEOUT, PORTAL_TICKET_FORM_URL
 
 log = logging.getLogger(__name__)
 
@@ -36,14 +37,67 @@ def fd_post(path: str, payload: dict):
 # --- Portal scraping ------------------------------------------------------
 
 def _scrape_portal_fields() -> list[dict]:
-    """Parse ticket fields from the public Freshdesk portal form.
+    """Parse ticket fields and conditional sections from the portal form.
 
-    This is used as a fallback when the Freshdesk API cannot be queried for
-    ticket field metadata. The parser extracts labels, input names, and any
-    select options from the ``/support/tickets/new`` HTML page. The resulting
-    structure is simplified compared to the API response but sufficient for
-    building a basic question flow.
+    Freshdesk's public portal renders dynamic forms entirely in HTML. Drop-down
+    choices that reveal additional questions store the dependent section HTML in
+    hidden ``textarea.picklist_section_*`` elements. This helper fetches the
+    portal form, walks the DOM and reconstructs a simplified representation of
+    the question flow including any nested sections.
     """
+
+    def parse_container(container: BeautifulSoup) -> list[dict]:
+        results: list[dict] = []
+        for group in container.find_all("div", class_="control-group", recursive=False):
+            label = group.find("label")
+            if not label:
+                continue
+            field_id = label.get("for")
+            if not field_id:
+                continue
+            input_el = group.find(id=field_id)
+            if input_el is None:
+                continue
+
+            name = input_el.get("name") or field_id
+            field_type = input_el.name
+            required = "required" in (label.get("class") or []) or "required" in (
+                input_el.get("class") or []
+            )
+
+            field: dict[str, object] = {
+                "id": name,
+                "label": label.get_text(strip=True),
+                "type": field_type,
+                "required": required,
+            }
+
+            if field_type == "select":
+                choices = []
+                for opt in input_el.find_all("option"):
+                    value = opt.get("value")
+                    if value is None:
+                        continue
+                    choice = {
+                        "value": value,
+                        "label": opt.get_text(strip=True),
+                    }
+                    data_id = opt.get("data-id")
+                    if data_id:
+                        textarea = container.find(
+                            "textarea", class_=f"picklist_section_{data_id}"
+                        )
+                        if textarea and textarea.text:
+                            inner = BeautifulSoup(textarea.text, "html.parser")
+                            nested = parse_container(inner)
+                            if nested:
+                                choice["section"] = nested
+                    choices.append(choice)
+                field["choices"] = choices
+
+            results.append(field)
+
+        return results
 
     try:
         resp = requests.get(PORTAL_TICKET_FORM_URL, timeout=HTTP_TIMEOUT)
@@ -57,36 +111,7 @@ def _scrape_portal_fields() -> list[dict]:
     if not form:
         return []
 
-    fields: list[dict] = []
-    for label in form.find_all("label"):
-        field_id = label.get("for")
-        if not field_id:
-            continue
-        input_el = form.find(id=field_id)
-        if input_el is None:
-            continue
-
-        name = input_el.get("name") or field_id
-        field_type = input_el.name
-        choices = []
-        if field_type == "select":
-            for opt in input_el.find_all("option"):
-                value = opt.get("value")
-                text = opt.get_text(strip=True)
-                if value is None:
-                    continue
-                choices.append({"value": value, "label": text})
-
-        fields.append(
-            {
-                "id": name,
-                "label": label.get_text(strip=True),
-                "type": field_type,
-                "choices": choices,
-            }
-        )
-
-    return fields
+    return parse_container(form)
 
 
 # --- Cached helpers ------------------------------------------------------
@@ -125,7 +150,6 @@ def get_ticket_fields_cached(ttl: int = 300):
         except Exception as e:
             log.warning("Ticket fields API failed (%s); falling back to portal scrape", e)
             _FIELDS_CACHE["data"] = _scrape_portal_fields()
-        _FIELDS_CACHE["data"] = fd_get("/api/v2/admin/ticket_fields")
         _FIELDS_CACHE["expires"] = now + ttl
     return _FIELDS_CACHE["data"]
 
