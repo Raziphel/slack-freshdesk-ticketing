@@ -12,5 +12,6 @@ def fd_get(path):
     r.raise_for_status()
     return r.json()
 
-print(fd_get("/api/v2/ticket-forms"))
-print(fd_get("/api/v2/admin/ticket_fields"))
+if __name__ == "__main__":
+    print(fd_get("/api/v2/ticket-forms"))
+    print(fd_get("/api/v2/admin/ticket_fields"))
