@@ -63,12 +63,7 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
         for sec in get_sections_cached(fid):
             conditional_children.update(normalize_id_list(sec.get("fields") or []))
     dependent_ids.update(conditional_children)
-    id_order = [
-        fid
-        for fid in id_order
-        if fid not in conditional_children
-        and not by_id.get(fid, {}).get("section_mappings")
-    ]
+    id_order = [fid for fid in id_order if fid not in conditional_children]
 
     # Ignore mandatory fields that aren't dependent on any previous answer.
     # These are often global requirements for customer portals but aren't
