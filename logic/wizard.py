@@ -82,6 +82,7 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
 
     pages: list[int | str | None] = []
     visited: set[int] = set()
+    active_sections: set[int] = set()
 
     def add_field_and_children(fid: int) -> bool:
         if fid in visited:
@@ -91,6 +92,13 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
         if not f or f.get("type") in {"default_subject","default_description"}:
             return True
         ensure_choices(f)
+        sec_ids = {
+            int(m.get("section_id"))
+            for m in (f.get("section_mappings") or [])
+            if m.get("section_id")
+        }
+        if sec_ids and not sec_ids.issubset(active_sections):
+            return True
         if not normalize_blocks(to_slack_block(f)):
             return True
         pages.append(fid)
@@ -107,9 +115,20 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
             for sec in get_sections_cached(fid):
                 if sel not in activator_values(sec):
                     continue
+                sid = sec.get("id")
+                if sid is not None:
+                    try:
+                        active_sections.add(int(sid))
+                    except (TypeError, ValueError):
+                        pass
                 for child_id in normalize_id_list(sec.get("fields") or []):
                     if not add_field_and_children(child_id):
                         return False
+                if sid is not None:
+                    try:
+                        active_sections.discard(int(sid))
+                    except (TypeError, ValueError):
+                        pass
             return True
 
         # Nested fields don't have conditional sections at this level; their
