@@ -16,20 +16,11 @@ def build_fields_for_form(form: dict, all_fields: list, state_values: dict | Non
 
     raw = form_detail.get("fields") or form.get("fields") or []
     id_order = normalize_id_list(raw)
-    id_order = [fid for fid in id_order if not by_id.get(fid, {}).get("section_mappings")]
-
     # children map
     dependent_ids: set[int] = set()
-    for f in all_fields:
-        if f.get("section_mappings"):
-            try:
-                dependent_ids.add(int(f.get("id")))
-            except (TypeError, ValueError):
-                continue
     for fid in id_order:
         for sec in get_sections_cached(fid):
-            for cid in sec.get("fields") or []:
-                dependent_ids.add(cid)
+            dependent_ids.update(normalize_id_list(sec.get("fields") or []))
 
     blocks = []
     subj = next((f for f in all_fields if f.get("type") == "default_subject"), None)
