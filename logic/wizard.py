@@ -108,11 +108,7 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
         # ``to_slack_block``.
         return True
 
-    for fid in id_order[:1]:
-        # Only follow the branch triggered by the first top-level field.
-        # Subsequent fields represent unrelated flows (e.g. Google Group
-        # requests) and would surface questions that don't apply to the
-        # user's chosen path.
+    for fid in id_order:
         if not add_field_and_children(fid):
             break
 
