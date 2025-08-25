@@ -58,12 +58,61 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     # remove them from the top‑level order. If the sections endpoint is
     # unavailable (returns no data) the set remains empty and we keep the
     # fields to avoid missing questions altogether.
+    # Map each section to its activating field so we can track any inputs that
+    # belong to that section even if the API doesn't list them as children.
     conditional_children: set[int] = set()
-    for fid in id_order:
+    section_parent: dict[int, int] = {}
+    prune_map: dict[int, tuple[int, int]] = {}
+
+    for f in all_fields:
+        try:
+            fid = int(f.get("id"))
+        except (TypeError, ValueError):
+            continue
         for sec in get_sections_cached(fid):
-            conditional_children.update(normalize_id_list(sec.get("fields") or []))
+            try:
+                sid = int(sec.get("id"))
+            except (TypeError, ValueError):
+                continue
+            section_parent[sid] = fid
+            for child_id in normalize_id_list(sec.get("fields") or []):
+                try:
+                    cid = int(child_id)
+                except (TypeError, ValueError):
+                    continue
+                conditional_children.add(cid)
+                prune_map.setdefault(cid, (sid, fid))
+
+    for f in all_fields:
+        try:
+            fid = int(f.get("id"))
+        except (TypeError, ValueError):
+            continue
+        for m in (f.get("section_mappings") or []):
+            try:
+                sid = int(m.get("section_id"))
+            except (TypeError, ValueError):
+                continue
+            parent = section_parent.get(sid)
+            if parent is not None:
+                conditional_children.add(fid)
+                prune_map.setdefault(fid, (sid, parent))
+
     dependent_ids.update(conditional_children)
-    id_order = [fid for fid in id_order if fid not in conditional_children]
+
+    new_order: list[int] = []
+    for fid in id_order:
+        if fid in conditional_children:
+            sid, parent = prune_map.get(fid, (None, None))
+            log.debug(
+                "Pruning field %s due to section %s triggered by %s",
+                fid,
+                sid,
+                parent,
+            )
+        else:
+            new_order.append(fid)
+    id_order = new_order
 
     # Ignore mandatory fields that aren't dependent on any previous answer.
     # These are often global requirements for customer portals but aren't
