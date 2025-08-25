@@ -29,6 +29,19 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     id_order = normalize_id_list(raw)
     by_id = {f["id"]: f for f in all_fields}
 
+    # Track fields that are referenced as dependents elsewhere so we can
+    # identify standalone required fields that don't apply to the user's
+    # chosen path. Freshdesk may mark such fields as mandatory for customers
+    # even when they aren't tied to a specific selection, which causes the
+    # wizard to surface irrelevant questions.
+    dependent_ids: set[int] = set()
+    for f in all_fields:
+        for dep in f.get("dependent_fields") or []:
+            try:
+                dependent_ids.add(int(dep.get("id")))
+            except (TypeError, ValueError):
+                continue
+
     # Fields that appear exclusively inside conditional sections are listed
     # both in ``fields`` and within their parent section definition. Showing
     # them unconditionally would surface questions that don't apply. We fetch
@@ -40,7 +53,23 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     for fid in id_order:
         for sec in get_sections_cached(fid):
             conditional_children.update(normalize_id_list(sec.get("fields") or []))
+    dependent_ids.update(conditional_children)
     id_order = [fid for fid in id_order if fid not in conditional_children]
+
+    # Ignore mandatory fields that aren't dependent on any previous answer.
+    # These are often global requirements for customer portals but aren't
+    # enforced for agent-created tickets, and showing them unconditionally can
+    # lead to confusing flows (e.g. JumpCloud Issue when another SaaS app is
+    # selected).
+    def _skip_unlinked_required(fid: int) -> bool:
+        f = by_id.get(fid) or {}
+        if fid in dependent_ids:
+            return False
+        if f.get("dependent_fields"):
+            return False
+        return f.get("required_for_customers") and not f.get("required_for_agents")
+
+    id_order = [fid for fid in id_order if not _skip_unlinked_required(fid)]
 
     pages: list[int | str | None] = []
     visited: set[int] = set()
@@ -79,7 +108,11 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
         # ``to_slack_block``.
         return True
 
-    for fid in id_order:
+    for fid in id_order[:1]:
+        # Only follow the branch triggered by the first top-level field.
+        # Subsequent fields represent unrelated flows (e.g. Google Group
+        # requests) and would surface questions that don't apply to the
+        # user's chosen path.
         if not add_field_and_children(fid):
             break
 
