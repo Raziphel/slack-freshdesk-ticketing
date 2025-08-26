@@ -82,16 +82,24 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
         use_scraped_sections = True
     id_order = normalize_id_list(raw)
     by_id: dict[object, dict] = {}
-    for f in all_fields:
-        fid = f.get("id")
+
+    def _add_to_map(field_obj):
+        fid = field_obj.get("id")
         if fid is None:
-            continue
-        by_id[fid] = f
-        by_id[str(fid)] = f
+            return
+        by_id[fid] = field_obj
+        by_id[str(fid)] = field_obj
         try:
-            by_id[int(fid)] = f
+            by_id[int(fid)] = field_obj
         except (TypeError, ValueError):
             pass
+        if field_obj.get("type") == "nested_field":
+            for df in field_obj.get("dependent_fields") or []:
+                if isinstance(df, dict):
+                    _add_to_map(df)
+
+    for f in all_fields:
+        _add_to_map(f)
 
     pages: list[int | str | None] = []
     visited: set[str] = set()
@@ -128,44 +136,42 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
             log.debug("Skipping field %s with no renderable blocks", fid_raw)
             return True
         visited.add(fid_key)
-        pages.append(f.get("id"))
-        # ``nested_field`` objects act as containers that render their
-        # dependent fields but do not store an answer themselves. Waiting for
-        # a value that never arrives causes the wizard to stop early after the
-        # nested block. We therefore skip the "expect an answer" step for these
-        # container fields so that subsequent questions continue to appear.
-        if f.get("type") != "nested_field":
-            selected = selected_value_for(f, state_values)
-            if selected is None:
-                return False
-            sel = str(selected)
-            if fid_int is not None:
-                if use_scraped_sections:
-                    secs_iter = scraped_sections.get(fid_int, [])
-                else:
-                    secs_iter = get_sections_cached(fid_int)
-                for sec in secs_iter:
-                    if sel not in activator_values(sec):
-                        continue
-                    sid = sec.get("id")
-                    if sid is not None:
-                        try:
-                            active_sections.add(int(sid))
-                        except (TypeError, ValueError):
-                            pass
-                    for child_id in normalize_id_list(sec.get("fields") or []):
-                        if not add_field_and_children(child_id):
-                            return False
-                    if sid is not None:
-                        try:
-                            active_sections.discard(int(sid))
-                        except (TypeError, ValueError):
-                            pass
+        if f.get("type") == "nested_field":
+            for df in sorted(f.get("dependent_fields") or [], key=lambda d: d.get("level", 99)):
+                dfid = df.get("id") if isinstance(df, dict) else df
+                if dfid is None:
+                    continue
+                if not add_field_and_children(dfid):
+                    return False
             return True
 
-        # Nested fields don't have conditional sections at this level; their
-        # dependent inputs are already included in the blocks returned by
-        # ``to_slack_block``.
+        pages.append(f.get("id"))
+        selected = selected_value_for(f, state_values)
+        if selected is None:
+            return False
+        sel = str(selected)
+        if fid_int is not None:
+            if use_scraped_sections:
+                secs_iter = scraped_sections.get(fid_int, [])
+            else:
+                secs_iter = get_sections_cached(fid_int)
+            for sec in secs_iter:
+                if sel not in activator_values(sec):
+                    continue
+                sid = sec.get("id")
+                if sid is not None:
+                    try:
+                        active_sections.add(int(sid))
+                    except (TypeError, ValueError):
+                        pass
+                for child_id in normalize_id_list(sec.get("fields") or []):
+                    if not add_field_and_children(child_id):
+                        return False
+                if sid is not None:
+                    try:
+                        active_sections.discard(int(sid))
+                    except (TypeError, ValueError):
+                        pass
         return True
 
     for fid in id_order:
@@ -188,7 +194,15 @@ def build_fields_for_page(form: dict, all_fields: list, state_values: dict, page
     submission step.
     """
 
-    by_id = {f["id"]: f for f in all_fields}
+    def _iter_fields(fields):
+        for f in fields:
+            yield f
+            if f.get("type") == "nested_field":
+                for df in f.get("dependent_fields") or []:
+                    if isinstance(df, dict):
+                        yield from _iter_fields([df])
+
+    by_id = {f["id"]: f for f in _iter_fields(all_fields)}
 
     if page_item == "core":
         blocks = []
