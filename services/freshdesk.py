@@ -131,6 +131,7 @@ def _scrape_portal_fields() -> list[dict]:
             fields.append(field_obj)
 
             classes = input_el.get("class") or []
+            input_type = (input_el.get("type") or "").lower()
             if field_type == "select" and "dynamic_sections" in classes and numeric_id is not None:
                 parent_key = numeric_id
                 for opt in input_el.find_all("option"):
@@ -142,6 +143,31 @@ def _scrape_portal_fields() -> list[dict]:
                         sid_int, {"id": sid_int, "choices": [], "fields": []}
                     )
                     sec["choices"].append({"value": opt.get("value"), "label": opt.get_text(strip=True)})
+            elif (
+                field_type == "input"
+                and input_type in {"radio", "checkbox"}
+                and numeric_id is not None
+                and any(cls in {"dynamic_sections", "depends_on"} for cls in classes)
+            ):
+                parent_key = numeric_id
+                sid: str | None = None
+                for key in ("data-dependent-id", "data-dependentid", "data-id"):
+                    sid = input_el.get(key)
+                    if sid and str(sid).isdigit():
+                        break
+                if not (sid and str(sid).isdigit()):
+                    for attr, val in input_el.attrs.items():
+                        if attr.startswith("data") and "id" in attr and isinstance(val, str) and val.isdigit():
+                            sid = val
+                            break
+                if sid and str(sid).isdigit():
+                    sid_int = int(sid)
+                    sec = sections_by_parent.setdefault(parent_key, {}).setdefault(
+                        sid_int, {"id": sid_int, "choices": [], "fields": []}
+                    )
+                    sec["choices"].append(
+                        {"value": input_el.get("value"), "label": label.get_text(strip=True)}
+                    )
 
         for ta in container.find_all("textarea", class_=lambda c: c and "picklist_section_" in " ".join(c)):
             cls = " ".join(ta.get("class", []))
