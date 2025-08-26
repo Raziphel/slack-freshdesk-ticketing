@@ -180,6 +180,52 @@ def _scrape_portal_fields() -> list[dict]:
 
     parse_fields(form)
 
+    # Some portals embed conditional field dependencies as JSON blobs inside
+    # <script> tags. These map a parent field to one or more sections and the
+    # child fields that should be shown when those sections are active. We
+    # attempt to locate and parse these scripts so that conditional logic is
+    # available even when the Freshdesk API cannot be queried.
+    field_by_id = {f["id"]: f for f in fields}
+    for script in soup.find_all("script"):
+        text = script.string or script.get_text() or ""
+        if "fieldDependencies" not in text:
+            continue
+        m = re.search(r"fieldDependencies\s*=\s*(\{.*?\})", text, re.S)
+        if not m:
+            continue
+        try:
+            deps = json.loads(m.group(1))
+        except Exception as e:  # pragma: no cover - best effort
+            log.debug("Skipping malformed fieldDependencies script: %s", e)
+            continue
+        if not isinstance(deps, dict):
+            continue
+        for parent, sec_map in deps.items():
+            try:
+                parent_key = int(parent)
+            except (TypeError, ValueError):
+                parent_key = parent
+            parent_sections = sections_by_parent.setdefault(parent_key, {})
+            for sec_id, children in (sec_map or {}).items():
+                try:
+                    sid = int(sec_id)
+                except (TypeError, ValueError):
+                    sid = sec_id
+                sec = parent_sections.setdefault(sid, {"id": sid, "choices": [], "fields": []})
+                for child in children or []:
+                    try:
+                        cid = int(child)
+                    except (TypeError, ValueError):
+                        cid = child
+                    if cid not in sec["fields"]:
+                        sec["fields"].append(cid)
+                    field_obj = field_by_id.get(cid)
+                    if field_obj is not None:
+                        field_obj.setdefault("section_mappings", []).append({"section_id": sid})
+                    sf = section_fields.setdefault(sid, [])
+                    if cid not in sf:
+                        sf.append(cid)
+
     for parent, sec_map in sections_by_parent.items():
         for sid, sec in sec_map.items():
             sec["fields"] = section_fields.get(sid, [])
