@@ -25,7 +25,16 @@ def filter_fields_for_form(form: dict, fd_fields: list[dict]):
     conditional children discovered via :func:`get_sections_cached`.
     """
 
-    ids = {str(i) for i in normalize_id_list(form.get("fields") or [])}
+    raw_ids = form.get("fields")
+    if not raw_ids:
+        try:
+            form_detail = get_form_detail(int(form["id"]))
+            raw_ids = form_detail.get("fields")
+        except Exception as e:
+            log.warning("Form detail API failed (%s); using scraped field order", e)
+            raw_ids = get_form_fields_scraped(int(form["id"]))
+
+    ids = {str(i) for i in normalize_id_list(raw_ids or [])}
     queue = list(ids)
     while queue:
         fid = queue.pop()
@@ -39,6 +48,9 @@ def filter_fields_for_form(form: dict, fd_fields: list[dict]):
                 if cid not in ids:
                     ids.add(cid)
                     queue.append(cid)
+
+    if not ids:
+        return fd_fields
 
     filtered: list[dict] = []
     for f in fd_fields:
