@@ -27,32 +27,47 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     form_detail = get_form_detail(int(form["id"]))
     raw = form_detail.get("fields") or form.get("fields") or []
     id_order = normalize_id_list(raw)
-    by_id = {f["id"]: f for f in all_fields}
+    by_id: dict[object, dict] = {}
+    for f in all_fields:
+        fid = f.get("id")
+        if fid is None:
+            continue
+        by_id[fid] = f
+        by_id[str(fid)] = f
+        try:
+            by_id[int(fid)] = f
+        except (TypeError, ValueError):
+            pass
 
     pages: list[int | str | None] = []
-    visited: set[int] = set()
+    visited: set[str] = set()
     active_sections: set[int] = set()
 
-    def add_field_and_children(fid: int) -> bool:
-        if fid in visited:
+    def add_field_and_children(fid_raw: int | str) -> bool:
+        fid_key = str(fid_raw)
+        if fid_key in visited:
             return True
-        f = by_id.get(fid)
+        f = by_id.get(fid_raw) or by_id.get(fid_key)
         if not f or f.get("type") in {"default_subject", "default_description"}:
-            visited.add(fid)
+            visited.add(fid_key)
             return True
         ensure_choices(f)
+        try:
+            fid_int = int(f.get("id"))
+        except (TypeError, ValueError):
+            fid_int = None
         sec_ids = {
             int(m.get("section_id"))
             for m in (f.get("section_mappings") or [])
             if m.get("section_id")
-        }
+        } if fid_int is not None else set()
         if sec_ids and not sec_ids.issubset(active_sections):
             return True
         if not normalize_blocks(to_slack_block(f)):
-            visited.add(fid)
+            visited.add(fid_key)
             return True
-        visited.add(fid)
-        pages.append(fid)
+        visited.add(fid_key)
+        pages.append(f.get("id"))
         # ``nested_field`` objects act as containers that render their
         # dependent fields but do not store an answer themselves. Waiting for
         # a value that never arrives causes the wizard to stop early after the
@@ -63,23 +78,24 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
             if selected is None:
                 return False
             sel = str(selected)
-            for sec in get_sections_cached(fid):
-                if sel not in activator_values(sec):
-                    continue
-                sid = sec.get("id")
-                if sid is not None:
-                    try:
-                        active_sections.add(int(sid))
-                    except (TypeError, ValueError):
-                        pass
-                for child_id in normalize_id_list(sec.get("fields") or []):
-                    if not add_field_and_children(child_id):
-                        return False
-                if sid is not None:
-                    try:
-                        active_sections.discard(int(sid))
-                    except (TypeError, ValueError):
-                        pass
+            if fid_int is not None:
+                for sec in get_sections_cached(fid_int):
+                    if sel not in activator_values(sec):
+                        continue
+                    sid = sec.get("id")
+                    if sid is not None:
+                        try:
+                            active_sections.add(int(sid))
+                        except (TypeError, ValueError):
+                            pass
+                    for child_id in normalize_id_list(sec.get("fields") or []):
+                        if not add_field_and_children(child_id):
+                            return False
+                    if sid is not None:
+                        try:
+                            active_sections.discard(int(sid))
+                        except (TypeError, ValueError):
+                            pass
             return True
 
         # Nested fields don't have conditional sections at this level; their
@@ -90,6 +106,13 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     for fid in id_order:
         if not add_field_and_children(fid):
             break
+
+    # Include any remaining fields that weren't referenced in ``id_order``.
+    for f in all_fields:
+        fid = f.get("id")
+        if fid is not None and str(fid) not in visited:
+            if not add_field_and_children(fid):
+                break
 
     pages.append("core")
     pages.append(None)
