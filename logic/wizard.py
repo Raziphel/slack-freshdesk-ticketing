@@ -16,6 +16,38 @@ log = logging.getLogger(__name__)
 
 WIZARD_SESSIONS: dict[str, dict] = {}  # token -> {"ticket_form_id":int, "page":int, "values":dict}
 
+
+def filter_fields_for_form(form: dict, fd_fields: list[dict]):
+    """Return only Freshdesk fields referenced by the form.
+
+    The returned list includes any fields listed on the form itself and any
+    conditional children discovered via :func:`get_sections_cached`.
+    """
+
+    ids = {str(i) for i in normalize_id_list(form.get("fields") or [])}
+    queue = list(ids)
+    while queue:
+        fid = queue.pop()
+        try:
+            fid_int = int(fid)
+        except (TypeError, ValueError):
+            continue
+        for sec in get_sections_cached(fid_int):
+            for child_id in normalize_id_list(sec.get("fields") or []):
+                cid = str(child_id)
+                if cid not in ids:
+                    ids.add(cid)
+                    queue.append(cid)
+
+    filtered: list[dict] = []
+    for f in fd_fields:
+        fid = f.get("id")
+        if fid is None:
+            continue
+        if str(fid) in ids or f.get("type") in {"default_subject", "default_description"}:
+            filtered.append(f)
+    return filtered
+
 def compute_pages(form: dict, all_fields: list, state_values: dict):
     """Compute the sequence of wizard pages.
 
@@ -206,6 +238,8 @@ def open_wizard_first_page(view_id: str, ticket_form_id: int, view_hash: str | N
         if not form:
             raise RuntimeError(f"Form {ticket_form_id} not found")
 
+        fd_fields = filter_fields_for_form(form, fd_fields)
+
         token = uuid.uuid4().hex
         WIZARD_SESSIONS[token] = {"ticket_form_id": ticket_form_id, "page": 0, "values": {}}
 
@@ -235,6 +269,8 @@ def update_wizard(view_id: str, token: str, view_hash: str | None, new_state_val
         form = next((f for f in forms if str(f["id"]) == str(sess["ticket_form_id"])), None)
         if not form:
             raise RuntimeError("Form not found for wizard session")
+
+        fd_fields = filter_fields_for_form(form, fd_fields)
 
         # Determine current page item and compute navigation relative to
         # the freshly generated page sequence. This avoids glitches where
