@@ -85,7 +85,12 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
         if fid_key in visited:
             return True
         f = by_id.get(fid_raw) or by_id.get(fid_key)
-        if not f or f.get("type") in {"default_subject", "default_description"}:
+        if not f:
+            log.debug("Skipping unknown field %s", fid_raw)
+            visited.add(fid_key)
+            return True
+        if f.get("type") in {"default_subject", "default_description"}:
+            log.debug("Skipping core field %s", fid_raw)
             visited.add(fid_key)
             return True
         ensure_choices(f)
@@ -99,9 +104,11 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
             if m.get("section_id")
         } if fid_int is not None else set()
         if sec_ids and not sec_ids.issubset(active_sections):
+            log.debug("Skipping field %s not in active section", fid_raw)
             return True
         if not normalize_blocks(to_slack_block(f)):
             visited.add(fid_key)
+            log.debug("Skipping field %s with no renderable blocks", fid_raw)
             return True
         visited.add(fid_key)
         pages.append(f.get("id"))
@@ -143,13 +150,9 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     for fid in id_order:
         if not add_field_and_children(fid):
             break
-
-    # Include any remaining fields that weren't referenced in ``id_order``.
-    for f in all_fields:
-        fid = f.get("id")
-        if fid is not None and str(fid) not in visited:
-            if not add_field_and_children(fid):
-                break
+    skipped = [f.get("id") for f in all_fields if str(f.get("id")) not in visited]
+    if skipped:
+        log.debug("Unreferenced fields skipped from wizard: %s", skipped)
 
     pages.append("core")
     pages.append(None)
