@@ -10,9 +10,8 @@ def build_fields_for_form(form: dict, all_fields: list, state_values: dict | Non
     by_id = {f["id"]: f for f in all_fields}
 
     form_detail = get_form_detail(int(form["id"]))
-    sections = {s["id"]: s for s in form_detail.get("sections", [])}
-    ordered_section_ids = [s["id"] for s in sorted(form_detail.get("sections", []),
-                                                   key=lambda x: x.get("position", 9999))]
+    sections_list = form_detail.get("sections", [])
+    sections = {s["id"]: s for s in sections_list}
 
     raw = form_detail.get("fields") or form.get("fields") or []
     id_order = normalize_id_list(raw)
@@ -28,7 +27,7 @@ def build_fields_for_form(form: dict, all_fields: list, state_values: dict | Non
     for core in (subj, desc):
         if core:
             blocks.extend(normalize_blocks(to_slack_block(core)))
-    if ordered_section_ids and blocks:
+    if sections_list and blocks:
         blocks.append({"type":"divider"})
 
     added: set[str] = set(b.get("block_id") for b in blocks if b.get("type") == "input")
@@ -60,38 +59,21 @@ def build_fields_for_form(form: dict, all_fields: list, state_values: dict | Non
                 if child:
                     _append_field_tree(child)
 
-    section_buckets = {sid: [] for sid in ordered_section_ids}
-    unsectioned = []
+    section_headers_added: set[int] = set()
 
     for fid in id_order:
         f = by_id.get(fid)
         if not f or f.get("type") in {"default_subject", "default_description"}:
             continue
-        mappings = f.get("section_mappings") or []
-        if mappings:
-            ms = sorted(mappings, key=lambda m: (m.get("position", 9999)))
-            first = ms[0]; sid = first.get("section_id")
-            (section_buckets if sid in section_buckets else unsectioned).append((first.get("position", 9999), f))
-        else:
-            unsectioned.append((f.get("position", 9999), f))
-
-    for sid in ordered_section_ids:
-        sec = sections.get(sid)
-        fields_in_sec = sorted(section_buckets[sid], key=lambda t: t[0])
-        if not fields_in_sec:
-            continue
-        visible_any = any(f["id"] not in dependent_ids for _, f in fields_in_sec)
-        if not visible_any:
-            continue
-        blocks.append({"type":"header","text":{"type":"plain_text","text":sec.get("name","Section")[:150]}})
-        for _, f in fields_in_sec:
-            if f["id"] in dependent_ids:
-                continue
-            _append_field_tree(f)
-
-    for _, f in sorted(unsectioned, key=lambda t: t[0]):
         if f["id"] in dependent_ids:
             continue
+        mappings = f.get("section_mappings") or []
+        if mappings:
+            sid = mappings[0].get("section_id")
+            if sid in sections and sid not in section_headers_added:
+                sec = sections.get(sid)
+                blocks.append({"type":"header","text":{"type":"plain_text","text":sec.get("name","Section")[:150]}})
+                section_headers_added.add(sid)
         _append_field_tree(f)
 
     if not [b for b in blocks if b.get("type") == "input"]:
