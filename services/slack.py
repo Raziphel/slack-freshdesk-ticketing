@@ -31,10 +31,21 @@ def slack_api(method: str, payload: dict):
 
 @lru_cache(maxsize=512)
 def get_user_email(user_id: str) -> str | None:
-    """Return the email address for a Slack user, if available."""
+    """Return the email address for a Slack user, if available.
+
+    Slack workspaces can hide email addresses unless the app has the
+    ``users:read.email`` scope.  Some workspaces, however, expose the email via
+    ``users.profile.get`` even when ``users.info`` omits it.  To maximize the
+    chances of retrieving the address we try ``users.info`` first and fall back
+    to ``users.profile.get`` if necessary.
+    """
     try:
         info = slack_api("users.info", {"user": user_id})
-        return ((info.get("user") or {}).get("profile") or {}).get("email")
+        email = ((info.get("user") or {}).get("profile") or {}).get("email")
+        if email:
+            return email
+        profile = slack_api("users.profile.get", {"user": user_id})
+        return (profile.get("profile") or {}).get("email")
     except Exception as e:
         log.warning("Could not fetch email for %s: %s", user_id, e)
         return None
