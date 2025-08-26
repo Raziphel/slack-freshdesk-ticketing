@@ -62,6 +62,24 @@ def _scrape_portal_fields() -> list[dict]:
         log.error("❌ Failed to fetch portal form %s (%s)", PORTAL_TICKET_FORM_URL, e)
         return []
 
+    # Capture the field order from the embedded ``ticket_form`` JSON so that we
+    # can preserve the question sequence when the API is unavailable. The
+    # object is typically assigned in a ``<script>`` tag as ``ticket_form = {...}``.
+    m = re.search(r"ticket_form\s*=\s*(\{.*?\});", resp.text, re.S)
+    if m:
+        try:
+            tf = json.loads(m.group(1))
+            form_id = tf.get("id")
+            if form_id is not None:
+                try:
+                    fid = int(form_id)
+                except (TypeError, ValueError):
+                    fid = form_id
+                order = [f.get("id") for f in tf.get("fields") or [] if f.get("id") is not None]
+                _SCRAPED_FORM_FIELDS[fid] = order
+        except Exception as e:  # pragma: no cover - best effort
+            log.debug("Skipping malformed ticket_form JSON: %s", e)
+
     soup = BeautifulSoup(resp.text, "html.parser")
     form = soup.find("form", id="portal_ticket_form") or soup.find("form")
     if not form:
@@ -253,6 +271,7 @@ def _scrape_portal_fields() -> list[dict]:
 _FORMS_CACHE: dict[str, object] = {"expires": 0, "data": []}
 _FIELDS_CACHE: dict[str, object] = {"expires": 0, "data": []}
 _SCRAPED_SECTIONS: dict[int, list] = {}
+_SCRAPED_FORM_FIELDS: dict[int, list] = {}
 
 # Attempt to warm the fields cache from the bundled JSON snapshot. If the
 # file exists we load it as a starting point but still refresh from the live
@@ -292,6 +311,15 @@ def get_ticket_fields_cached(ttl: int = 300):
 
 def get_form_detail(form_id: int):
     return fd_get(f"/api/v2/ticket-forms/{form_id}")
+
+
+def get_form_fields_scraped(form_id: int) -> list:
+    """Return the field order scraped from the portal form."""
+    order = _SCRAPED_FORM_FIELDS.get(int(form_id))
+    if order is None:
+        _scrape_portal_fields()
+        order = _SCRAPED_FORM_FIELDS.get(int(form_id), [])
+    return order or []
 
 
 def get_sections(field_id: int):

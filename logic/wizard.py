@@ -5,6 +5,7 @@ from services.freshdesk import (
     get_form_detail,
     get_ticket_forms_cached,
     get_ticket_fields_cached,
+    get_form_fields_scraped,
 )
 from services.slack import slack_api
 from logic.forms import normalize_id_list
@@ -24,8 +25,12 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     trailing ``None`` sentinel marks the final submission step.
     """
 
-    form_detail = get_form_detail(int(form["id"]))
-    raw = form_detail.get("fields") or form.get("fields") or []
+    try:
+        form_detail = get_form_detail(int(form["id"]))
+        raw = form_detail.get("fields") or form.get("fields") or []
+    except Exception as e:
+        log.warning("Form detail API failed (%s); using scraped field order", e)
+        raw = get_form_fields_scraped(int(form["id"])) or form.get("fields") or []
     id_order = normalize_id_list(raw)
     by_id: dict[object, dict] = {}
     for f in all_fields:
