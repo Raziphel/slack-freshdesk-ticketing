@@ -259,6 +259,16 @@ def _scrape_portal_fields() -> list[dict]:
             continue
         if not isinstance(deps, dict):
             continue
+        choice_maps = {}
+        for cvar in ("choice_field_map", "choiceFieldMap", "choice_field_maps", "choiceFieldMaps"):
+            mc = re.search(rf"{cvar}\s*=\s*(\{{.*?\}})", text, re.S)
+            if not mc:
+                continue
+            try:
+                choice_maps = json.loads(mc.group(1))
+            except Exception as e:  # pragma: no cover - best effort
+                log.debug("Skipping malformed %s script: %s", cvar, e)
+            break
         for parent, sec_map in deps.items():
             try:
                 parent_key = int(parent)
@@ -271,6 +281,24 @@ def _scrape_portal_fields() -> list[dict]:
                 except (TypeError, ValueError):
                     sid = sec_id
                 sec = parent_sections.setdefault(sid, {"id": sid, "choices": [], "fields": []})
+                parent_choice_map = choice_maps.get(str(parent)) or choice_maps.get(parent)
+                sec_choice_map = {}
+                if isinstance(parent_choice_map, dict):
+                    sec_choice_map = parent_choice_map.get(str(sec_id)) or parent_choice_map.get(sec_id) or {}
+                if isinstance(sec_choice_map, dict):
+                    for val, lbl in sec_choice_map.items():
+                        sec["choices"].append({"value": val, "label": lbl if isinstance(lbl, str) else str(lbl)})
+                elif isinstance(sec_choice_map, list):
+                    for val in sec_choice_map:
+                        if isinstance(val, dict):
+                            sec["choices"].append({
+                                "value": val.get("value"),
+                                "label": val.get("label", val.get("value")),
+                            })
+                        else:
+                            sec["choices"].append({"value": val, "label": str(val)})
+                elif sec_choice_map:
+                    sec["choices"].append({"value": sec_choice_map, "label": str(sec_choice_map)})
                 for child in children or []:
                     try:
                         cid = int(child)
