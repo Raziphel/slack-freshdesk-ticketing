@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 import requests
 import logging
+import os
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from config import (
@@ -15,6 +16,8 @@ from config import (
 )
 
 log = logging.getLogger(__name__)
+
+FD_DEBUG_SCRAPE = os.getenv("FD_DEBUG_SCRAPE", "").lower() in {"1", "true", "yes"}
 
 
 _session = requests.Session()
@@ -234,6 +237,14 @@ def _scrape_portal_fields() -> list[dict]:
         except (TypeError, ValueError):
             key = parent
         _SCRAPED_SECTIONS[key] = list(sec_map.values())
+
+    if FD_DEBUG_SCRAPE:
+        for parent, secs in _SCRAPED_SECTIONS.items():
+            summary = {s["id"]: s.get("fields", []) for s in secs}
+            log.debug("Parsed sections parent %s -> %s", parent, summary)
+        for f in fields:
+            if f.get("section_mappings"):
+                log.debug("Field %s section mappings: %s", f["id"], f["section_mappings"])
 
     return fields
 
