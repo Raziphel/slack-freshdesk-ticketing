@@ -6,6 +6,7 @@ from services.freshdesk import (
     get_ticket_forms_cached,
     get_ticket_fields_cached,
     get_form_fields_scraped,
+    get_sections_scraped,
 )
 from services.slack import slack_api
 from logic.forms import normalize_id_list
@@ -57,12 +58,16 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     trailing ``None`` sentinel marks the final submission step.
     """
 
+    scraped_sections: dict[int, list] = {}
+    use_scraped_sections = False
     try:
         form_detail = get_form_detail(int(form["id"]))
         raw = form_detail.get("fields") or form.get("fields") or []
     except Exception as e:
         log.warning("Form detail API failed (%s); using scraped field order", e)
         raw = get_form_fields_scraped(int(form["id"])) or form.get("fields") or []
+        scraped_sections = get_sections_scraped(int(form["id"]))
+        use_scraped_sections = True
     id_order = normalize_id_list(raw)
     by_id: dict[object, dict] = {}
     for f in all_fields:
@@ -123,7 +128,11 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
                 return False
             sel = str(selected)
             if fid_int is not None:
-                for sec in get_sections_cached(fid_int):
+                if use_scraped_sections:
+                    secs_iter = scraped_sections.get(fid_int, [])
+                else:
+                    secs_iter = get_sections_cached(fid_int)
+                for sec in secs_iter:
                     if sel not in activator_values(sec):
                         continue
                     sid = sec.get("id")

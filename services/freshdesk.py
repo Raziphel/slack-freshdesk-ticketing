@@ -62,9 +62,19 @@ def _scrape_portal_fields() -> list[dict]:
         log.error("❌ Failed to fetch portal form %s (%s)", PORTAL_TICKET_FORM_URL, e)
         return []
 
-    # Capture the field order from the embedded ``ticket_form`` JSON so that we
-    # can preserve the question sequence when the API is unavailable. The
-    # object is typically assigned in a ``<script>`` tag as ``ticket_form = {...}``.
+    # Structures populated during scraping. ``sections_by_parent`` maps a parent
+    # field id to its conditional sections while ``section_fields`` collects the
+    # child field ids for each section. ``name_to_id`` normalizes ``name``
+    # attributes to numeric ids when available.
+    name_to_id: dict[str, int] = {}
+    sections_by_parent: dict[object, dict[int, dict]] = {}
+    section_fields: dict[int, list] = {}
+    form_key = None
+
+    # Capture metadata from the embedded ``ticket_form`` JSON so that we can
+    # preserve the question sequence and conditional logic when the API is
+    # unavailable. The object is typically assigned in a ``<script>`` tag as
+    # ``ticket_form = {...}``.
     m = re.search(r"ticket_form\s*=\s*(\{.*?\});", resp.text, re.S)
     if m:
         try:
@@ -72,11 +82,66 @@ def _scrape_portal_fields() -> list[dict]:
             form_id = tf.get("id")
             if form_id is not None:
                 try:
-                    fid = int(form_id)
+                    form_key = int(form_id)
                 except (TypeError, ValueError):
-                    fid = form_id
-                order = [f.get("id") for f in tf.get("fields") or [] if f.get("id") is not None]
-                _SCRAPED_FORM_FIELDS[fid] = order
+                    form_key = form_id
+                fields_json = tf.get("fields") or []
+                order = [f.get("id") for f in fields_json if isinstance(f, dict) and f.get("id") is not None]
+                _SCRAPED_FORM_FIELDS[form_key] = order
+                for f in fields_json:
+                    if not isinstance(f, dict):
+                        continue
+                    nm = f.get("name") or f.get("field_name")
+                    fid_num = f.get("id")
+                    if nm and isinstance(fid_num, int):
+                        name_to_id[str(nm)] = fid_num
+                deps = tf.get("field_dependencies") or {}
+                choice_maps = {}
+                for cvar in ("choice_field_map", "choiceFieldMap", "choice_field_maps", "choiceFieldMaps"):
+                    cm = tf.get(cvar)
+                    if isinstance(cm, dict):
+                        choice_maps = cm
+                        break
+                for parent, sec_map in deps.items():
+                    try:
+                        parent_key = int(parent)
+                    except (TypeError, ValueError):
+                        parent_key = parent
+                    parent_sections = sections_by_parent.setdefault(parent_key, {})
+                    for sec_id, children in (sec_map or {}).items():
+                        try:
+                            sid = int(sec_id)
+                        except (TypeError, ValueError):
+                            sid = sec_id
+                        sec = parent_sections.setdefault(sid, {"id": sid, "choices": [], "fields": []})
+                        parent_choice_map = choice_maps.get(str(parent)) or choice_maps.get(parent) or {}
+                        sec_choice_map = {}
+                        if isinstance(parent_choice_map, dict):
+                            sec_choice_map = parent_choice_map.get(str(sec_id)) or parent_choice_map.get(sec_id) or {}
+                        if isinstance(sec_choice_map, dict):
+                            for val, lbl in sec_choice_map.items():
+                                sec["choices"].append({"value": val, "label": lbl if isinstance(lbl, str) else str(lbl)})
+                        elif isinstance(sec_choice_map, list):
+                            for val in sec_choice_map:
+                                if isinstance(val, dict):
+                                    sec["choices"].append({
+                                        "value": val.get("value"),
+                                        "label": val.get("label", val.get("value")),
+                                    })
+                                else:
+                                    sec["choices"].append({"value": val, "label": str(val)})
+                        elif sec_choice_map:
+                            sec["choices"].append({"value": sec_choice_map, "label": str(sec_choice_map)})
+                        for child in children or []:
+                            try:
+                                cid = int(child)
+                            except (TypeError, ValueError):
+                                cid = child
+                            if cid not in sec["fields"]:
+                                sec["fields"].append(cid)
+                            sf = section_fields.setdefault(sid, [])
+                            if cid not in sf:
+                                sf.append(cid)
         except Exception as e:  # pragma: no cover - best effort
             log.debug("Skipping malformed ticket_form JSON: %s", e)
 
@@ -89,7 +154,6 @@ def _scrape_portal_fields() -> list[dict]:
     # field ``name`` values to their numeric ``id`` counterparts which are
     # required for conditional section logic. Parse any such blobs up-front so
     # that scraped fields can be normalized to numeric identifiers.
-    name_to_id: dict[str, int] = {}
     for script in soup.find_all("script"):
         text = script.string or script.get_text() or ""
         for pat in (r"portal\.ticket_form\s*=\s*(\{.*?\})", r"ticket_form\s*=\s*(\{.*?\})"):
@@ -111,13 +175,11 @@ def _scrape_portal_fields() -> list[dict]:
                 if not isinstance(f, dict):
                     continue
                 nm = f.get("name") or f.get("field_name")
-                fid = f.get("id")
-                if nm and isinstance(fid, int):
-                    name_to_id[str(nm)] = fid
+                fid_tmp = f.get("id")
+                if nm and isinstance(fid_tmp, int):
+                    name_to_id.setdefault(str(nm), fid_tmp)
 
     fields: list[dict] = []
-    sections_by_parent: dict[object, dict[int, dict]] = {}
-    section_fields: dict[int, list] = {}
 
     def parse_fields(container, current_section: int | None = None):
         for label in container.find_all("label"):
@@ -339,6 +401,12 @@ def _scrape_portal_fields() -> list[dict]:
         except (TypeError, ValueError):
             key = parent
         _SCRAPED_SECTIONS[key] = list(sec_map.values())
+        if form_key is not None:
+            try:
+                fid_key = int(form_key)
+            except (TypeError, ValueError):
+                fid_key = form_key
+            _SCRAPED_FORM_SECTIONS.setdefault(fid_key, {})[key] = list(sec_map.values())
 
     if FD_DEBUG_SCRAPE:
         for parent, secs in _SCRAPED_SECTIONS.items():
@@ -355,7 +423,13 @@ def _scrape_portal_fields() -> list[dict]:
 _FORMS_CACHE: dict[str, object] = {"expires": 0, "data": []}
 _FIELDS_CACHE: dict[str, object] = {"expires": 0, "data": []}
 _SCRAPED_SECTIONS: dict[int, list] = {}
+# ``_SCRAPED_FORM_FIELDS`` stores the ordered list of field IDs for a given
+# form while ``_SCRAPED_FORM_SECTIONS`` maps a form id to its conditional
+# sections grouped by parent field id. These structures are populated by the
+# portal scraper and act as fallbacks when the Freshdesk admin API is
+# unavailable.
 _SCRAPED_FORM_FIELDS: dict[int, list] = {}
+_SCRAPED_FORM_SECTIONS: dict[int, dict[int, list]] = {}
 
 # Attempt to warm the fields cache from the bundled JSON snapshot. If the
 # file exists we load it as a starting point but still refresh from the live
@@ -404,6 +478,19 @@ def get_form_fields_scraped(form_id: int) -> list:
         _scrape_portal_fields()
         order = _SCRAPED_FORM_FIELDS.get(int(form_id), [])
     return order or []
+
+
+def get_sections_scraped(form_id: int) -> dict[int, list]:
+    """Return conditional sections scraped for ``form_id``.
+
+    The returned mapping is ``{parent_field_id: [section, ...]}`` where each
+    section object mirrors the structure returned by the Freshdesk admin API.
+    """
+    secs = _SCRAPED_FORM_SECTIONS.get(int(form_id))
+    if secs is None:
+        _scrape_portal_fields()
+        secs = _SCRAPED_FORM_SECTIONS.get(int(form_id), {})
+    return secs or {}
 
 
 def get_sections(field_id: int):
