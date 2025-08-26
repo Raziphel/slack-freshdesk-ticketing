@@ -1,6 +1,7 @@
 from __future__ import annotations
 import time
 import json
+import re
 from pathlib import Path
 import requests
 import logging
@@ -59,75 +60,108 @@ def _scrape_portal_fields() -> list[dict]:
         return []
 
     soup = BeautifulSoup(resp.text, "html.parser")
-    form = soup.find("form")
+    form = soup.find("form", id="portal_ticket_form") or soup.find("form")
     if not form:
         return []
 
     fields: list[dict] = []
-    for label in form.find_all("label"):
-        field_dom_id = label.get("for")
-        if not field_dom_id:
-            continue
-        input_el = form.find(id=field_dom_id)
-        if input_el is None:
-            continue
+    sections_by_parent: dict[object, dict[int, dict]] = {}
+    section_fields: dict[int, list] = {}
 
-        name = input_el.get("name") or field_dom_id
-        field_type = input_el.name
+    def parse_fields(container, current_section: int | None = None):
+        for label in container.find_all("label"):
+            field_dom_id = label.get("for")
+            if not field_dom_id:
+                continue
+            input_el = container.find(id=field_dom_id)
+            if input_el is None:
+                continue
 
-        # Attempt to extract the numeric field id used by the API. Freshdesk
-        # exposes this value via ``data-field-id`` attributes on either the
-        # input element or one of its ancestor containers. Falling back to a
-        # best-effort digit scrape ensures the IDs align with those returned by
-        # ``get_form_detail`` whenever possible.
-        numeric_id: int | None = None
-        candidates = [
-            input_el.get("data-field-id"),
-            input_el.get("data-fieldid"),
-            input_el.get("data-id"),
-            label.get("data-field-id"),
-            label.get("data-fieldid"),
-            label.get("data-id"),
-        ]
-        container = input_el.find_parent(attrs={"data-field-id": True})
-        if container is None:
-            container = label.find_parent(attrs={"data-field-id": True})
-        if container is not None:
-            candidates.append(container.get("data-field-id"))
-        for cand in candidates:
-            if cand and str(cand).isdigit():
-                try:
-                    numeric_id = int(cand)
-                    break
-                except (TypeError, ValueError):
-                    pass
-        if numeric_id is None:
-            for attr in (input_el.get("id"), name):
-                digits = "".join(ch for ch in str(attr) if ch.isdigit())
-                if digits:
+            name = input_el.get("name") or field_dom_id
+            field_type = input_el.name
+
+            numeric_id: int | None = None
+            candidates = [
+                input_el.get("data-field-id"),
+                input_el.get("data-fieldid"),
+                input_el.get("data-id"),
+                label.get("data-field-id"),
+                label.get("data-fieldid"),
+                label.get("data-id"),
+            ]
+            container_id = input_el.find_parent(attrs={"data-field-id": True})
+            if container_id is None:
+                container_id = label.find_parent(attrs={"data-field-id": True})
+            if container_id is not None:
+                candidates.append(container_id.get("data-field-id"))
+            for cand in candidates:
+                if cand and str(cand).isdigit():
                     try:
-                        numeric_id = int(digits)
+                        numeric_id = int(cand)
                         break
                     except (TypeError, ValueError):
-                        numeric_id = None
+                        pass
+            if numeric_id is None:
+                for attr in (input_el.get("id"), name):
+                    digits = "".join(ch for ch in str(attr) if ch.isdigit())
+                    if digits:
+                        try:
+                            numeric_id = int(digits)
+                            break
+                        except (TypeError, ValueError):
+                            numeric_id = None
 
-        choices = []
-        if field_type == "select":
-            for opt in input_el.find_all("option"):
-                value = opt.get("value")
-                text = opt.get_text(strip=True)
-                if value is None:
-                    continue
-                choices.append({"value": value, "label": text})
-
-        fields.append(
-            {
+            choices = []
+            if field_type == "select":
+                for opt in input_el.find_all("option"):
+                    value = opt.get("value")
+                    text = opt.get_text(strip=True)
+                    if value is None:
+                        continue
+                    choices.append({"value": value, "label": text})
+            field_obj = {
                 "id": numeric_id if numeric_id is not None else name,
                 "label": label.get_text(strip=True),
                 "type": field_type,
                 "choices": choices,
             }
-        )
+            if current_section is not None:
+                field_obj.setdefault("section_mappings", []).append({"section_id": current_section})
+                section_fields.setdefault(current_section, []).append(field_obj["id"])
+            fields.append(field_obj)
+
+            classes = input_el.get("class") or []
+            if field_type == "select" and "dynamic_sections" in classes and numeric_id is not None:
+                parent_key = numeric_id
+                for opt in input_el.find_all("option"):
+                    sid = opt.get("data-id")
+                    if not sid or not str(sid).isdigit():
+                        continue
+                    sid_int = int(sid)
+                    sec = sections_by_parent.setdefault(parent_key, {}).setdefault(
+                        sid_int, {"id": sid_int, "choices": [], "fields": []}
+                    )
+                    sec["choices"].append({"value": opt.get("value"), "label": opt.get_text(strip=True)})
+
+        for ta in container.find_all("textarea", class_=lambda c: c and "picklist_section_" in " ".join(c)):
+            cls = " ".join(ta.get("class", []))
+            m = re.search(r"picklist_section_(\d+)", cls)
+            if not m:
+                continue
+            sid = int(m.group(1))
+            subsection = BeautifulSoup(ta.text, "html.parser")
+            parse_fields(subsection, current_section=sid)
+
+    parse_fields(form)
+
+    for parent, sec_map in sections_by_parent.items():
+        for sid, sec in sec_map.items():
+            sec["fields"] = section_fields.get(sid, [])
+        try:
+            key = int(parent)
+        except (TypeError, ValueError):
+            key = parent
+        _SCRAPED_SECTIONS[key] = list(sec_map.values())
 
     return fields
 
@@ -135,6 +169,7 @@ def _scrape_portal_fields() -> list[dict]:
 # --- Cached helpers ------------------------------------------------------
 _FORMS_CACHE: dict[str, object] = {"expires": 0, "data": []}
 _FIELDS_CACHE: dict[str, object] = {"expires": 0, "data": []}
+_SCRAPED_SECTIONS: dict[int, list] = {}
 
 # Attempt to warm the fields cache from the bundled JSON snapshot. If the
 # file exists we load it as a starting point but still refresh from the live
@@ -181,17 +216,22 @@ def get_sections(field_id: int):
     url = f"https://{FRESHDESK_DOMAIN}.freshdesk.com{path}"
     try:
         r = _session.get(url, timeout=HTTP_TIMEOUT)
-        if not r.ok:
-            # Freshdesk returns 400/404/422 when a field has no
-            # conditional sections configured. These responses are
-            # expected during wizard traversal so we quietly treat
-            # them as "no sections" instead of logging noisy errors.
-            log.debug("No sections for field %s (%s)", field_id, r.status_code)
-            return []
-        return r.json() or []
+        if r.ok:
+            return r.json() or []
+        # Freshdesk returns 400/404/422 when a field has no conditional
+        # sections configured. These responses are expected during wizard
+        # traversal so we quietly treat them as "no sections" instead of
+        # logging noisy errors.
+        log.debug("No sections for field %s (%s)", field_id, r.status_code)
     except Exception as e:
         log.debug("No sections for field %s (%s)", field_id, e)
-        return []
+
+    # Fallback to scraped portal mappings
+    secs = _SCRAPED_SECTIONS.get(int(field_id))
+    if secs is None:
+        _scrape_portal_fields()
+        secs = _SCRAPED_SECTIONS.get(int(field_id), [])
+    return secs or []
 
 
 def fetch_field_detail(field_id: int) -> dict | None:
