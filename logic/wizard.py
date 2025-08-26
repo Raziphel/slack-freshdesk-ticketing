@@ -29,106 +29,6 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     id_order = normalize_id_list(raw)
     by_id = {f["id"]: f for f in all_fields}
 
-    # Track fields that are referenced as dependents elsewhere so we can
-    # identify standalone required fields that don't apply to the user's
-    # chosen path. Freshdesk may mark such fields as mandatory for customers
-    # even when they aren't tied to a specific selection, which causes the
-    # wizard to surface irrelevant questions.
-    dependent_ids: set[int] = set()
-    for f in all_fields:
-        for dep in f.get("dependent_fields") or []:
-            try:
-                dependent_ids.add(int(dep.get("id")))
-            except (TypeError, ValueError):
-                continue
-        # Fields mapped to sections are conditional on another answer and
-        # should only appear when the triggering question is shown. Treat
-        # them as dependents even if the parent field isn't part of the
-        # form so that they don't surface unexpectedly.
-        if f.get("section_mappings"):
-            try:
-                dependent_ids.add(int(f.get("id")))
-            except (TypeError, ValueError):
-                continue
-
-    # Fields that appear exclusively inside conditional sections are listed
-    # both in ``fields`` and within their parent section definition. Showing
-    # them unconditionally would surface questions that don't apply. We fetch
-    # the section details up front to identify these conditional children and
-    # remove them from the top‑level order. If the sections endpoint is
-    # unavailable (returns no data) the set remains empty and we keep the
-    # fields to avoid missing questions altogether.
-    # Map each section to its activating field so we can track any inputs that
-    # belong to that section even if the API doesn't list them as children.
-    conditional_children: set[int] = set()
-    section_parent: dict[int, int] = {}
-    prune_map: dict[int, tuple[int, int]] = {}
-
-    for f in all_fields:
-        try:
-            fid = int(f.get("id"))
-        except (TypeError, ValueError):
-            continue
-        for sec in get_sections_cached(fid):
-            try:
-                sid = int(sec.get("id"))
-            except (TypeError, ValueError):
-                continue
-            section_parent[sid] = fid
-            for child_id in normalize_id_list(sec.get("fields") or []):
-                try:
-                    cid = int(child_id)
-                except (TypeError, ValueError):
-                    continue
-                conditional_children.add(cid)
-                prune_map.setdefault(cid, (sid, fid))
-
-    for f in all_fields:
-        try:
-            fid = int(f.get("id"))
-        except (TypeError, ValueError):
-            continue
-        for m in (f.get("section_mappings") or []):
-            try:
-                sid = int(m.get("section_id"))
-            except (TypeError, ValueError):
-                continue
-            parent = section_parent.get(sid)
-            if parent is not None:
-                conditional_children.add(fid)
-                prune_map.setdefault(fid, (sid, parent))
-
-    dependent_ids.update(conditional_children)
-
-    new_order: list[int] = []
-    for fid in id_order:
-        if fid in conditional_children:
-            sid, parent = prune_map.get(fid, (None, None))
-            log.debug(
-                "Pruning field %s due to section %s triggered by %s",
-                fid,
-                sid,
-                parent,
-            )
-        else:
-            new_order.append(fid)
-    id_order = new_order
-
-    # Ignore mandatory fields that aren't dependent on any previous answer.
-    # These are often global requirements for customer portals but aren't
-    # enforced for agent-created tickets, and showing them unconditionally can
-    # lead to confusing flows (e.g. JumpCloud Issue when another SaaS app is
-    # selected).
-    def _skip_unlinked_required(fid: int) -> bool:
-        f = by_id.get(fid) or {}
-        if fid in dependent_ids:
-            return False
-        if f.get("dependent_fields"):
-            return False
-        return f.get("required_for_customers") and not f.get("required_for_agents")
-
-    id_order = [fid for fid in id_order if not _skip_unlinked_required(fid)]
-
     pages: list[int | str | None] = []
     visited: set[int] = set()
     active_sections: set[int] = set()
@@ -136,9 +36,9 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
     def add_field_and_children(fid: int) -> bool:
         if fid in visited:
             return True
-        visited.add(fid)
         f = by_id.get(fid)
-        if not f or f.get("type") in {"default_subject","default_description"}:
+        if not f or f.get("type") in {"default_subject", "default_description"}:
+            visited.add(fid)
             return True
         ensure_choices(f)
         sec_ids = {
@@ -149,7 +49,9 @@ def compute_pages(form: dict, all_fields: list, state_values: dict):
         if sec_ids and not sec_ids.issubset(active_sections):
             return True
         if not normalize_blocks(to_slack_block(f)):
+            visited.add(fid)
             return True
+        visited.add(fid)
         pages.append(fid)
         # ``nested_field`` objects act as containers that render their
         # dependent fields but do not store an answer themselves. Waiting for
