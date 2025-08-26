@@ -65,15 +65,52 @@ def _scrape_portal_fields() -> list[dict]:
 
     fields: list[dict] = []
     for label in form.find_all("label"):
-        field_id = label.get("for")
-        if not field_id:
+        field_dom_id = label.get("for")
+        if not field_dom_id:
             continue
-        input_el = form.find(id=field_id)
+        input_el = form.find(id=field_dom_id)
         if input_el is None:
             continue
 
-        name = input_el.get("name") or field_id
+        name = input_el.get("name") or field_dom_id
         field_type = input_el.name
+
+        # Attempt to extract the numeric field id used by the API. Freshdesk
+        # exposes this value via ``data-field-id`` attributes on either the
+        # input element or one of its ancestor containers. Falling back to a
+        # best-effort digit scrape ensures the IDs align with those returned by
+        # ``get_form_detail`` whenever possible.
+        numeric_id: int | None = None
+        candidates = [
+            input_el.get("data-field-id"),
+            input_el.get("data-fieldid"),
+            input_el.get("data-id"),
+            label.get("data-field-id"),
+            label.get("data-fieldid"),
+            label.get("data-id"),
+        ]
+        container = input_el.find_parent(attrs={"data-field-id": True})
+        if container is None:
+            container = label.find_parent(attrs={"data-field-id": True})
+        if container is not None:
+            candidates.append(container.get("data-field-id"))
+        for cand in candidates:
+            if cand and str(cand).isdigit():
+                try:
+                    numeric_id = int(cand)
+                    break
+                except (TypeError, ValueError):
+                    pass
+        if numeric_id is None:
+            for attr in (input_el.get("id"), name):
+                digits = "".join(ch for ch in str(attr) if ch.isdigit())
+                if digits:
+                    try:
+                        numeric_id = int(digits)
+                        break
+                    except (TypeError, ValueError):
+                        numeric_id = None
+
         choices = []
         if field_type == "select":
             for opt in input_el.find_all("option"):
@@ -85,7 +122,7 @@ def _scrape_portal_fields() -> list[dict]:
 
         fields.append(
             {
-                "id": name,
+                "id": numeric_id if numeric_id is not None else name,
                 "label": label.get_text(strip=True),
                 "type": field_type,
                 "choices": choices,
