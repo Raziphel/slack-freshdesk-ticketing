@@ -4,8 +4,14 @@ import json
 from pathlib import Path
 import requests
 import logging
+from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
-from config import FRESHDESK_DOMAIN, FRESHDESK_API_KEY, HTTP_TIMEOUT
+from config import (
+    FRESHDESK_DOMAIN,
+    FRESHDESK_API_KEY,
+    HTTP_TIMEOUT,
+    PORTAL_TICKET_FORM_URL,
+)
 
 log = logging.getLogger(__name__)
 
@@ -125,7 +131,6 @@ def get_ticket_fields_cached(ttl: int = 300):
         except Exception as e:
             log.warning("Ticket fields API failed (%s); falling back to portal scrape", e)
             _FIELDS_CACHE["data"] = _scrape_portal_fields()
-        _FIELDS_CACHE["data"] = fd_get("/api/v2/admin/ticket_fields")
         _FIELDS_CACHE["expires"] = now + ttl
     return _FIELDS_CACHE["data"]
 
