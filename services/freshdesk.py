@@ -67,6 +67,36 @@ def _scrape_portal_fields() -> list[dict]:
     if not form:
         return []
 
+    # ``ticket_form`` metadata is often embedded in the page as JSON. It maps
+    # field ``name`` values to their numeric ``id`` counterparts which are
+    # required for conditional section logic. Parse any such blobs up-front so
+    # that scraped fields can be normalized to numeric identifiers.
+    name_to_id: dict[str, int] = {}
+    for script in soup.find_all("script"):
+        text = script.string or script.get_text() or ""
+        for pat in (r"portal\.ticket_form\s*=\s*(\{.*?\})", r"ticket_form\s*=\s*(\{.*?\})"):
+            m = re.search(pat, text, re.S)
+            if not m:
+                continue
+            try:
+                obj = json.loads(m.group(1))
+            except Exception:  # pragma: no cover - best effort
+                continue
+            if isinstance(obj, dict) and "ticket_form" in obj and isinstance(obj["ticket_form"], dict):
+                obj = obj["ticket_form"]
+            if not isinstance(obj, dict):
+                continue
+            fields_json = obj.get("fields") or []
+            if not isinstance(fields_json, list):
+                continue
+            for f in fields_json:
+                if not isinstance(f, dict):
+                    continue
+                nm = f.get("name") or f.get("field_name")
+                fid = f.get("id")
+                if nm and isinstance(fid, int):
+                    name_to_id[str(nm)] = fid
+
     fields: list[dict] = []
     sections_by_parent: dict[object, dict[int, dict]] = {}
     section_fields: dict[int, list] = {}
@@ -113,6 +143,8 @@ def _scrape_portal_fields() -> list[dict]:
                             break
                         except (TypeError, ValueError):
                             numeric_id = None
+            if numeric_id is None:
+                numeric_id = name_to_id.get(str(name))
 
             choices = []
             if field_type == "select":
@@ -183,12 +215,36 @@ def _scrape_portal_fields() -> list[dict]:
 
     parse_fields(form)
 
+    def _replace_id(val):
+        if isinstance(val, str) and val in name_to_id:
+            return name_to_id[val]
+        return val
+
+    for f in fields:
+        f["id"] = _replace_id(f.get("id"))
+    for sid, flist in section_fields.items():
+        section_fields[sid] = [_replace_id(fid) for fid in flist]
+
+    updated_sections: dict[object, dict[int, dict]] = {}
+    for parent, sec_map in sections_by_parent.items():
+        new_parent = _replace_id(parent)
+        updated_sections[new_parent] = sec_map
+    sections_by_parent = updated_sections
+
     # Some portals embed conditional field dependencies as JSON blobs inside
     # <script> tags. These map a parent field to one or more sections and the
     # child fields that should be shown when those sections are active. We
     # attempt to locate and parse these scripts so that conditional logic is
     # available even when the Freshdesk API cannot be queried.
-    field_by_id = {f["id"]: f for f in fields}
+    field_by_id: dict[object, dict] = {}
+    for f in fields:
+        fid = f.get("id")
+        if fid is None:
+            continue
+        try:
+            field_by_id[int(fid)] = f
+        except (TypeError, ValueError):
+            field_by_id[fid] = f
     for script in soup.find_all("script"):
         text = script.string or script.get_text() or ""
         if "fieldDependencies" not in text:
