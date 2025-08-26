@@ -1,4 +1,4 @@
-import sys, pathlib
+import sys, pathlib, logging
 sys.path.append(str(pathlib.Path(__file__).resolve().parents[1]))
 
 from services import freshdesk
@@ -69,3 +69,66 @@ def test_compute_pages_uses_scraped_sections_on_api_failure(monkeypatch):
     monkeypatch.setattr(wizard, "get_sections_cached", lambda fid: (_ for _ in ()).throw(Exception("should not call")))
     pages = wizard.compute_pages(form, fields, state_values)
     assert pages[:2] == [1, 2]
+
+
+def test_scrape_alt_dom_pattern_and_compute_pages(monkeypatch, caplog):
+    html = '''
+    <html><body>
+    <script>
+    ticket_form = {
+        "id": 5,
+        "fields": [
+            {"id": 154001624274, "name": "parent"},
+            {"id": 154001624387, "name": "child"}
+        ]
+    };
+    </script>
+    <form id="portal_ticket_form">
+        <label for="p">Parent</label>
+        <select id="p" name="parent">
+            <option value="" />
+            <option value="other" data-section-id="77" data-dependent-fields="[154001624387]">Other SaaS Applications</option>
+        </select>
+        <label for="c">Child</label><input id="c" name="child" />
+    </form>
+    </body></html>
+    '''
+
+    class Resp:
+        text = html
+        def raise_for_status(self):
+            pass
+
+    monkeypatch.setattr(freshdesk.requests, "get", lambda url, timeout: Resp())
+    freshdesk._SCRAPED_FORM_FIELDS.clear()
+    freshdesk._SCRAPED_FORM_SECTIONS.clear()
+    freshdesk._SCRAPED_SECTIONS.clear()
+    with caplog.at_level(logging.INFO):
+        freshdesk._scrape_portal_fields()
+    assert "154001624274" in caplog.text
+    assert "154001624387" in caplog.text
+    secs = freshdesk.get_sections_scraped(5)
+    assert 154001624274 in secs
+    assert any(154001624387 in s.get("fields", []) for s in secs[154001624274])
+
+    form = {"id": 5}
+    fields = [
+        {
+            "id": 154001624274,
+            "name": "parent",
+            "type": "custom_dropdown",
+            "choices": [{"value": "other", "label": "Other SaaS Applications"}],
+            "required_for_customers": True,
+        },
+        {
+            "id": 154001624387,
+            "name": "child",
+            "type": "custom_text",
+            "required_for_customers": True,
+        },
+    ]
+    state_values = {"parent": {"a": {"type": "static_select", "selected_option": {"value": "other"}}}}
+    monkeypatch.setattr(wizard, "get_form_detail", lambda fid: (_ for _ in ()).throw(Exception("boom")))
+    monkeypatch.setattr(wizard, "get_sections_cached", lambda fid: (_ for _ in ()).throw(Exception("should not call")))
+    pages = wizard.compute_pages(form, fields, state_values)
+    assert pages[:2] == [154001624274, 154001624387]

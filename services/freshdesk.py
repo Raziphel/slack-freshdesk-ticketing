@@ -283,6 +283,45 @@ def _scrape_portal_fields() -> list[dict]:
                     sec["choices"].append(
                         {"value": input_el.get("value"), "label": label.get_text(strip=True)}
                     )
+            elif field_type == "select" and numeric_id is not None:
+                parent_key = numeric_id
+                for opt in input_el.find_all("option"):
+                    child_ids: list[int] = []
+                    for attr, val in opt.attrs.items():
+                        if not isinstance(attr, str) or not isinstance(val, str):
+                            continue
+                        if (
+                            "field" in attr or "child" in attr or "dependent" in attr
+                        ) and (
+                            "id" in attr or "ids" in attr or "fields" in attr
+                        ):
+                            for d in re.findall(r"\d+", val):
+                                try:
+                                    child_ids.append(int(d))
+                                except Exception:
+                                    pass
+                    if not child_ids:
+                        continue
+                    sid_val = None
+                    for key in ("data-section-id", "data-sectionid", "data-id"):
+                        sval = opt.get(key)
+                        if sval and str(sval).isdigit():
+                            sid_val = int(sval)
+                            break
+                    if sid_val is None:
+                        sid_val = abs(hash((numeric_id, opt.get("value")))) % 1000000000
+                    sec = sections_by_parent.setdefault(parent_key, {}).setdefault(
+                        sid_val, {"id": sid_val, "choices": [], "fields": []}
+                    )
+                    sec["choices"].append(
+                        {"value": opt.get("value"), "label": opt.get_text(strip=True)}
+                    )
+                    for cid in child_ids:
+                        if cid not in sec["fields"]:
+                            sec["fields"].append(cid)
+                        sf = section_fields.setdefault(sid_val, [])
+                        if cid not in sf:
+                            sf.append(cid)
 
         for ta in container.find_all("textarea", class_=lambda c: c and "picklist_section_" in " ".join(c)):
             cls = " ".join(ta.get("class", []))
@@ -327,20 +366,30 @@ def _scrape_portal_fields() -> list[dict]:
             field_by_id[fid] = f
     for script in soup.find_all("script"):
         text = script.string or script.get_text() or ""
-        if "fieldDependencies" not in text:
-            continue
-        m = re.search(r"fieldDependencies\s*=\s*(\{.*?\})", text, re.S)
-        if not m:
+        dep_match = None
+        for var in ("fieldDependencies", "dependentSections", "dependent_sections"):
+            if var in text:
+                dep_match = re.search(rf"{var}\s*=\s*(\{{.*?\}})", text, re.S)
+                if dep_match:
+                    break
+        if not dep_match:
             continue
         try:
-            deps = json.loads(m.group(1))
+            deps = json.loads(dep_match.group(1))
         except Exception as e:  # pragma: no cover - best effort
             log.debug("Skipping malformed fieldDependencies script: %s", e)
             continue
         if not isinstance(deps, dict):
             continue
         choice_maps = {}
-        for cvar in ("choice_field_map", "choiceFieldMap", "choice_field_maps", "choiceFieldMaps"):
+        for cvar in (
+            "choice_field_map",
+            "choiceFieldMap",
+            "choice_field_maps",
+            "choiceFieldMaps",
+            "sectionChoiceMap",
+            "section_choice_map",
+        ):
             mc = re.search(rf"{cvar}\s*=\s*(\{{.*?\}})", text, re.S)
             if not mc:
                 continue
@@ -392,6 +441,13 @@ def _scrape_portal_fields() -> list[dict]:
                     sf = section_fields.setdefault(sid, [])
                     if cid not in sf:
                         sf.append(cid)
+    for sid, flist in section_fields.items():
+        for fid in flist:
+            field_obj = field_by_id.get(fid)
+            if field_obj is not None:
+                mappings = field_obj.setdefault("section_mappings", [])
+                if not any(m.get("section_id") == sid for m in mappings):
+                    mappings.append({"section_id": sid})
 
     for parent, sec_map in sections_by_parent.items():
         for sid, sec in sec_map.items():
@@ -407,6 +463,19 @@ def _scrape_portal_fields() -> list[dict]:
             except (TypeError, ValueError):
                 fid_key = form_key
             _SCRAPED_FORM_SECTIONS.setdefault(fid_key, {})[key] = list(sec_map.values())
+
+    target_parent = 154001624274
+    target_child = 154001624387
+    tgt = sections_by_parent.get(target_parent)
+    if tgt:
+        found = any(target_child in (s.get("fields") or []) for s in tgt.values())
+        log.info(
+            "Scraped sections for %s include child %s: %s", target_parent, target_child, found
+        )
+        if FD_DEBUG_SCRAPE:
+            log.debug("sections_by_parent[%s] -> %s", target_parent, tgt)
+    else:
+        log.info("Parent %s not found in scraped sections", target_parent)
 
     if FD_DEBUG_SCRAPE:
         for parent, secs in _SCRAPED_SECTIONS.items():
@@ -490,7 +559,7 @@ def get_sections_scraped(form_id: int) -> dict[int, list]:
     if secs is None:
         _scrape_portal_fields()
         secs = _SCRAPED_FORM_SECTIONS.get(int(form_id), {})
-    return secs or {}
+    return dict(secs or {})
 
 
 def get_sections(field_id: int):
