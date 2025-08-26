@@ -325,6 +325,8 @@ def update_wizard(view_id: str, token: str, view_hash: str | None, new_state_val
                 f = by_id.get(item)
                 if f and f.get("name"):
                     valid_names.add(f["name"])
+        if "core" in pages:
+            valid_names.update({"subject", "description"})
         sess["values"] = {k: v for k, v in sess["values"].items() if k in valid_names}
         pages = compute_pages(form, fd_fields, sess["values"])
 
