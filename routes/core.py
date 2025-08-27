@@ -83,7 +83,7 @@ def interactions():
     view  = payload.get("view", {})
     cb    = view.get("callback_id")
 
-    # Step 1: choose the FD form
+    # choose the FD form
     if ptype == "view_submission" and cb == "pick_form":
         values = view.get("state", {}).get("values", {})
         sel = values.get("form_select", {}).get("ticket_form_select", {})

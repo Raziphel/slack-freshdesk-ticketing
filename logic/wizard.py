@@ -16,7 +16,7 @@ from logic.branching import get_sections_cached, activator_values, selected_valu
 log = logging.getLogger(__name__)
 
 # Tracking wizard sessions in memory so I know where each user left off.
-WIZARD_SESSIONS: dict[str, dict] = {}  # token -> {"ticket_form_id":int, "page":int, "values":dict}
+WIZARD_SESSIONS: dict[str, dict] = {}  # {"ticket_form_id":int, "page":int, "values":dict}
 
 
 def filter_fields_for_form(form: dict, fd_fields: list[dict]):

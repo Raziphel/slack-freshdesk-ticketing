@@ -44,7 +44,7 @@ def fd_post(path: str, payload: dict):
     return r.json()
 
 
-# --- Portal scraping ------------------------------------------------------
+# Portal scraping
 
 def _scrape_portal_fields() -> list[dict]:
     """Parse ticket fields from the public Freshdesk portal form.
@@ -489,7 +489,7 @@ def _scrape_portal_fields() -> list[dict]:
     return fields
 
 
-# --- Cached helpers ------------------------------------------------------
+# Cached helpers 
 _FORMS_CACHE: dict[str, object] = {"expires": 0, "data": []}
 _FIELDS_CACHE: dict[str, object] = {"expires": 0, "data": []}
 _SCRAPED_SECTIONS: dict[int, list] = {}

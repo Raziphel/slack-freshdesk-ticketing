@@ -11,7 +11,7 @@ from logic.mapping import (
 log = logging.getLogger(__name__)
 
 def resolve_proxy_value(field_name: str, proxy_or_value: str) -> str:
-    # When I stored a hash for long values, this resolves it back if possible.
+    # A hash for long values, this resolves it back if possible.
     val = str(proxy_or_value or "")
     if not val.startswith("hash:"):
         return val
@@ -83,5 +83,5 @@ def modal_values_to_fd_ticket(values: dict, ticket_form_id: int | None, requeste
 
     if custom_fields:
         ticket["custom_fields"] = custom_fields
-    # Note to future me: FD ignores ticket_form_id, so tags and field values do the routing.
+    # FD ignores ticket_form_id, so tags and field values do the routing.
     return ticket

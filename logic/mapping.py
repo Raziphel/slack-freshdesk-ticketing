@@ -28,7 +28,7 @@ def slug(s: str) -> str:
     return re.sub(r"\s+", "-", s)
 
 def proxy_value_if_needed(raw: str) -> str:
-    # When values get too long I stash a hash so Slack doesn't choke.
+    # When values get too long stash a hash so Slack doesn't choke.
     raw = str(raw)
     if len(raw) <= 150:
         return raw

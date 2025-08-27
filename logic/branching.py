@@ -24,7 +24,7 @@ def activator_values(sec_obj) -> list[str]:
         vals.append(str(v))
     return vals
 
-# Note to self: wizard and single-page flows both lean on this; lazy import keeps cycles away.
+# wizard and single-page flows both lean on this; lazy import keeps cycles away.
 def selected_value_for(field: dict, state_values: dict) -> str | None:
     entry = state_values.get(field.get("name")) or {}
     selected = extract_input(entry)
