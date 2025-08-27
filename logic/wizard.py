@@ -15,6 +15,7 @@ from logic.branching import get_sections_cached, activator_values, selected_valu
 
 log = logging.getLogger(__name__)
 
+# Tracking wizard sessions in memory so I know where each user left off.
 WIZARD_SESSIONS: dict[str, dict] = {}  # token -> {"ticket_form_id":int, "page":int, "values":dict}
 
 
@@ -31,6 +32,7 @@ def filter_fields_for_form(form: dict, fd_fields: list[dict]):
             form_detail = get_form_detail(int(form["id"]))
             raw_ids = form_detail.get("fields")
         except Exception as e:
+            # Falling back to scraping when the API doesn't cooperate.
             log.warning("Form detail API failed (%s); using scraped field order", e)
             raw_ids = get_form_fields_scraped(int(form["id"]))
 

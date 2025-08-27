@@ -2,6 +2,7 @@ import json
 from config import FORM_NAME_TO_DISPLAY
 
 def loading_modal(msg="Loading…"):
+    # Simple little spinner modal so folks know I'm fetching stuff.
     return {
         "type": "modal",
         "callback_id": "loading",
@@ -11,6 +12,7 @@ def loading_modal(msg="Loading…"):
     }
 
 def build_form_picker_modal(forms):
+    # Building the first step where I ask the user which form they want.
     options = []
     for f in forms:
         raw_name = f.get("name", f"Form {f.get('id')}")

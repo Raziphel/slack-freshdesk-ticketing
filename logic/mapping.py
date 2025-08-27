@@ -5,7 +5,7 @@ from services.freshdesk import fetch_field_detail
 
 log = logging.getLogger(__name__)
 
-# Type families
+# Grouping field types so I don't have to keep checking the docs.
 TEXT_LIKE = {"text","email","phone_number","short_text","long_text","custom_text","custom_url","url"}
 NUMBER_LIKE = {"custom_number","custom_decimal","number","decimal"}
 PARAGRAPH_LIKE = {"custom_paragraph","textarea"}
@@ -20,6 +20,7 @@ SKIP_ALWAYS = {
 }
 
 def slug(s: str) -> str:
+    # Quick slug so I can match names regardless of spacing or case.
     s = (s or "").strip().lower()
     s = s.replace("&", "and")
     s = re.sub(r"\s+", " ", s)
@@ -27,6 +28,7 @@ def slug(s: str) -> str:
     return re.sub(r"\s+", "-", s)
 
 def proxy_value_if_needed(raw: str) -> str:
+    # When values get too long I stash a hash so Slack doesn't choke.
     raw = str(raw)
     if len(raw) <= 150:
         return raw

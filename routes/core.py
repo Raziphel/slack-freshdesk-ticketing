@@ -19,6 +19,7 @@ bp = Blueprint("core", __name__)
 
 
 def _notify_user_ticket_created(user_id: str, ticket_id: int) -> bool:
+    # Giving the requester a heads-up in Slack once their ticket is born.
     try:
         dm = slack_api("conversations.open", {"users": user_id})
         channel_id = (dm.get("channel") or {}).get("id") or user_id
@@ -30,6 +31,7 @@ def _notify_user_ticket_created(user_id: str, ticket_id: int) -> bool:
 
 @bp.route("/it-ticket", methods=["POST"])
 def it_ticket_command():
+    # Handling the /it-ticket slash command kickoff.
     trigger_id = request.form.get("trigger_id")
     # Open a lightweight loading modal immediately to avoid trigger expiry
     initial = slack_api(
@@ -75,6 +77,7 @@ def it_ticket_command():
 
 @bp.route("/interactions", methods=["POST"])
 def interactions():
+    # All the Slack interactive callbacks funnel through here.
     payload = json.loads(request.form["payload"])
     ptype = payload.get("type")
     view  = payload.get("view", {})

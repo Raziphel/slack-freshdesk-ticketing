@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 FD_DEBUG_SCRAPE = os.getenv("FD_DEBUG_SCRAPE", "").lower() in {"1", "true", "yes"}
 
 
+# Keeping a session around so each call reuses connections and carries auth.
 _session = requests.Session()
 _session.auth = (FRESHDESK_API_KEY, "X")
 _session.mount("https://", HTTPAdapter(pool_connections=20, pool_maxsize=20))
