@@ -6,6 +6,7 @@ from logic.mapping import to_slack_block, normalize_blocks, ensure_choices
 from logic.branching import get_sections_cached, activator_values, selected_value_for
 
 def build_fields_for_form(form: dict, all_fields: list, state_values: dict | None = None):
+    # I'm building the single page layout here without losing track of user selections.
     state_values = state_values or {}
     by_id = {f["id"]: f for f in all_fields}
 
@@ -15,7 +16,7 @@ def build_fields_for_form(form: dict, all_fields: list, state_values: dict | Non
 
     raw = form_detail.get("fields") or form.get("fields") or []
     id_order = normalize_id_list(raw)
-    # children map
+    # Mapping out children ahead of time so I don't add them twice.
     dependent_ids: set[int] = set()
     for fid in id_order:
         for sec in get_sections_cached(fid):
@@ -33,6 +34,7 @@ def build_fields_for_form(form: dict, all_fields: list, state_values: dict | Non
     added: set[str] = set(b.get("block_id") for b in blocks if b.get("type") == "input")
 
     def _append_field_tree(field_obj: dict):
+        # Recursively pulling in children so the form feels natural.
         nonlocal blocks, added
         bid = field_obj.get("name")
         if bid and bid in added:

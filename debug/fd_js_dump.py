@@ -3,6 +3,7 @@ import requests
 from dotenv import load_dotenv
 load_dotenv()
 
+# Quick helper script for me to dump field metadata when I'm confused.
 domain = os.getenv("FRESHDESK_DOMAIN")
 api_key = os.getenv("FRESHDESK_API_KEY")
 

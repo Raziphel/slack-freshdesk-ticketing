@@ -3,6 +3,7 @@ from services import slack
 
 
 def test_get_user_email_fallback(monkeypatch):
+    # Making sure my fallback path kicks in when Slack hides emails.
     calls = []
 
     def fake_api(method, payload):

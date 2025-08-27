@@ -5,6 +5,7 @@ from logic.mapping import slug
 log = logging.getLogger(__name__)
 
 def filter_portal_forms(forms: list[dict]):
+    # Logging what's available so I can see what Freshdesk is handing back.
     log.info("FD forms available: %s", [f.get("name") for f in forms])
 
     if ALLOWED_FORM_IDS:
@@ -39,6 +40,7 @@ def filter_portal_forms(forms: list[dict]):
     return forms
 
 def normalize_id_list(raw_ids):
+    # Turning whatever object Freshdesk gives me into a plain list of ids.
     ids = []
     for f in raw_ids or []:
         if isinstance(f, dict):

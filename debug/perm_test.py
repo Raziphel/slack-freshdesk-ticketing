@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 import os, requests
 load_dotenv()
 
+# Just poking the API to make sure my credentials are still valid.
 FRESHDESK_DOMAIN = os.getenv("FRESHDESK_DOMAIN")
 FRESHDESK_API_KEY = os.getenv("FRESHDESK_API_KEY")
 
