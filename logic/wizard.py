@@ -1,5 +1,6 @@
 from __future__ import annotations
 import time, uuid, logging
+from concurrent.futures import ThreadPoolExecutor
 from config import MAX_BLOCKS
 from services.freshdesk import (
     get_form_detail,
@@ -272,8 +273,11 @@ def build_wizard_page_modal(form: dict, all_fields: list, token: str, page: int,
 # helpers used by routes (async flows)
 def open_wizard_first_page(view_id: str, ticket_form_id: int, view_hash: str | None):
     try:
-        forms = get_ticket_forms_cached()
-        fd_fields = get_ticket_fields_cached()
+        with ThreadPoolExecutor() as ex:
+            forms_future = ex.submit(get_ticket_forms_cached)
+            fields_future = ex.submit(get_ticket_fields_cached)
+            forms = forms_future.result()
+            fd_fields = fields_future.result()
         form = next((f for f in forms if str(f["id"]) == str(ticket_form_id)), None)
         if not form:
             raise RuntimeError(f"Form {ticket_form_id} not found")
@@ -289,7 +293,7 @@ def open_wizard_first_page(view_id: str, ticket_form_id: int, view_hash: str | N
         except RuntimeError as e:
             data = e.args[0] if e.args else {}
             if isinstance(data, dict) and data.get("error") == "hash_conflict":
-                time.sleep(0.15)
+                time.sleep(0.05)
                 slack_api("views.update", {"view_id": view_id, "view": view})
             else:
                 raise
@@ -304,8 +308,11 @@ def update_wizard(view_id: str, token: str, view_hash: str | None, new_state_val
         # Merge incoming view state
         sess["values"] = {**(sess.get("values") or {}), **(new_state_values or {})}
 
-        forms = get_ticket_forms_cached()
-        fd_fields = get_ticket_fields_cached()
+        with ThreadPoolExecutor() as ex:
+            forms_future = ex.submit(get_ticket_forms_cached)
+            fields_future = ex.submit(get_ticket_fields_cached)
+            forms = forms_future.result()
+            fd_fields = fields_future.result()
         form = next((f for f in forms if str(f["id"]) == str(sess["ticket_form_id"])), None)
         if not form:
             raise RuntimeError("Form not found for wizard session")
@@ -356,7 +363,7 @@ def update_wizard(view_id: str, token: str, view_hash: str | None, new_state_val
         except RuntimeError as e:
             data = e.args[0] if e.args else {}
             if isinstance(data, dict) and data.get("error") == "hash_conflict":
-                time.sleep(0.15)
+                time.sleep(0.05)
                 slack_api("views.update", {"view_id": view_id, "view": view})
             else:
                 raise
