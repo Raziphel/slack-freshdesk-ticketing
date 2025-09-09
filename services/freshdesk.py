@@ -465,19 +465,6 @@ def _scrape_portal_fields() -> list[dict]:
                 fid_key = form_key
             _SCRAPED_FORM_SECTIONS.setdefault(fid_key, {})[key] = list(sec_map.values())
 
-    target_parent = 154001624274
-    target_child = 154001624387
-    tgt = sections_by_parent.get(target_parent)
-    if tgt:
-        found = any(target_child in (s.get("fields") or []) for s in tgt.values())
-        log.info(
-            "Scraped sections for %s include child %s: %s", target_parent, target_child, found
-        )
-        if FD_DEBUG_SCRAPE:
-            log.debug("sections_by_parent[%s] -> %s", target_parent, tgt)
-    else:
-        log.info("Parent %s not found in scraped sections", target_parent)
-
     if FD_DEBUG_SCRAPE:
         for parent, secs in _SCRAPED_SECTIONS.items():
             summary = {s["id"]: s.get("fields", []) for s in secs}
@@ -559,7 +546,10 @@ def get_sections_scraped(form_id: int) -> dict[int, list]:
     secs = _SCRAPED_FORM_SECTIONS.get(int(form_id))
     if secs is None:
         _scrape_portal_fields()
-        secs = _SCRAPED_FORM_SECTIONS.get(int(form_id), {})
+        secs = _SCRAPED_FORM_SECTIONS.get(int(form_id))
+        if secs is None:
+            _SCRAPED_FORM_SECTIONS[int(form_id)] = {}
+            secs = {}
     return dict(secs or {})
 
 
@@ -579,10 +569,14 @@ def get_sections(field_id: int):
         log.debug("No sections for field %s (%s)", field_id, e)
 
     # Fallback to scraped portal mappings
-    secs = _SCRAPED_SECTIONS.get(int(field_id))
+    fid = int(field_id)
+    secs = _SCRAPED_SECTIONS.get(fid)
     if secs is None:
         _scrape_portal_fields()
-        secs = _SCRAPED_SECTIONS.get(int(field_id), [])
+        secs = _SCRAPED_SECTIONS.get(fid)
+        if secs is None:
+            _SCRAPED_SECTIONS[fid] = []
+            secs = []
     return secs or []
 
 
