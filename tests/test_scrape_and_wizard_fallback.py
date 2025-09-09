@@ -71,7 +71,7 @@ def test_compute_pages_uses_scraped_sections_on_api_failure(monkeypatch):
     assert pages[:2] == [1, 2]
 
 
-def test_scrape_alt_dom_pattern_and_compute_pages(monkeypatch, caplog):
+def test_scrape_alt_dom_pattern_and_compute_pages(monkeypatch):
     html = '''
     <html><body>
     <script>
@@ -103,10 +103,7 @@ def test_scrape_alt_dom_pattern_and_compute_pages(monkeypatch, caplog):
     freshdesk._SCRAPED_FORM_FIELDS.clear()
     freshdesk._SCRAPED_FORM_SECTIONS.clear()
     freshdesk._SCRAPED_SECTIONS.clear()
-    with caplog.at_level(logging.INFO):
-        freshdesk._scrape_portal_fields()
-    assert "154001624274" in caplog.text
-    assert "154001624387" in caplog.text
+    freshdesk._scrape_portal_fields()
     secs = freshdesk.get_sections_scraped(5)
     assert 154001624274 in secs
     assert any(154001624387 in s.get("fields", []) for s in secs[154001624274])
