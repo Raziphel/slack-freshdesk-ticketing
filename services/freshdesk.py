@@ -6,6 +6,7 @@ from pathlib import Path
 import requests
 import logging
 import os
+import threading
 from bs4 import BeautifulSoup
 from requests.adapters import HTTPAdapter
 from config import (
@@ -522,6 +523,19 @@ def get_ticket_fields_cached(ttl: int = 300):
             _FIELDS_CACHE["data"] = _scrape_portal_fields()
         _FIELDS_CACHE["expires"] = now + ttl
     return _FIELDS_CACHE["data"]
+
+
+def _prewarm_caches():
+    """Warm Freshdesk caches in the background so first requests are fast."""
+    try:
+        get_ticket_forms_cached()
+        get_ticket_fields_cached()
+    except Exception as e:  # pragma: no cover - best effort
+        log.debug("Prewarm failed: %s", e)
+
+
+# Kick off prewarming thread immediately on import.
+threading.Thread(target=_prewarm_caches, daemon=True).start()
 
 
 def get_form_detail(form_id: int):

@@ -15,7 +15,7 @@ def test_get_user_email_fallback(monkeypatch):
         raise AssertionError("unexpected method")
 
     monkeypatch.setattr(slack, "slack_api", fake_api)
-    slack.get_user_email.cache_clear()
+    slack._EMAIL_CACHE.clear()
     assert slack.get_user_email("U123") == "u@example.com"
     assert calls == ["users.info", "users.profile.get"]
 
@@ -32,7 +32,7 @@ def test_get_user_email_info_error(monkeypatch):
         raise AssertionError("unexpected method")
 
     monkeypatch.setattr(slack, "slack_api", fake_api)
-    slack.get_user_email.cache_clear()
+    slack._EMAIL_CACHE.clear()
     assert slack.get_user_email("U123") == "u@example.com"
     assert calls == ["users.info", "users.profile.get"]
 
@@ -56,6 +56,6 @@ def test_get_user_email_profile_field(monkeypatch):
         raise AssertionError("unexpected method")
 
     monkeypatch.setattr(slack, "slack_api", fake_api)
-    slack.get_user_email.cache_clear()
+    slack._EMAIL_CACHE.clear()
     assert slack.get_user_email("U123") == "u@example.com"
     assert calls == ["users.info", "users.profile.get"]
